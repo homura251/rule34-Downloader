@@ -136,7 +136,7 @@ class Rule34Database private constructor(context: Context) :
     fun updateLastSeenPostId(tag: String, postId: Long) {
         writableDatabase.execSQL(
             "UPDATE artists SET last_seen_post_id = MAX(last_seen_post_id, ?) WHERE tag = ?",
-            arrayOf(postId, tag),
+            arrayOf<Any>(postId, tag),
         )
         signalChanged()
     }
