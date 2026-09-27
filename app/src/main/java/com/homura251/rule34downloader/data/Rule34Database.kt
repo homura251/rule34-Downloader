@@ -218,7 +218,7 @@ class Rule34Database private constructor(context: Context) :
         )
         writableDatabase.execSQL(
             "UPDATE artists SET current_post_id = ? WHERE tag = ?",
-            arrayOf(postId, tag),
+            arrayOf<Any>(postId, tag),
         )
         signalChanged()
     }
