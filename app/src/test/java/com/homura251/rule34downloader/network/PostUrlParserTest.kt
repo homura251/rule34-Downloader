@@ -21,8 +21,33 @@ class PostUrlParserTest {
     }
 
     @Test
+    fun parsesArtistTagFromListUrl() {
+        assertEquals(
+            "savvyraexo",
+            PostUrlParser.parseArtistTag(
+                "https://rule34.xxx/index.php?page=post&s=list&tags=savvyraexo",
+            ),
+        )
+    }
+
+    @Test
+    fun normalizesDirectArtistTag() {
+        assertEquals("some_artist", PostUrlParser.parseArtistTag("artist: some artist"))
+    }
+
+    @Test
+    fun rejectsMultiTagListUrl() {
+        assertNull(
+            PostUrlParser.parseArtistTag(
+                "https://rule34.xxx/index.php?page=post&s=list&tags=foo+bar",
+            ),
+        )
+    }
+
+    @Test
     fun rejectsOtherHosts() {
         assertNull(PostUrlParser.parsePostId("https://example.com/?id=18875738"))
+        assertNull(PostUrlParser.parseArtistTag("https://example.com/?tags=test"))
     }
 
     @Test

@@ -115,7 +115,7 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (!credentialsConfigured) {
-                item { CredentialsCard(onSettings) }
+                item { OptionalApiCard(onSettings) }
             }
             if (artists.isEmpty()) {
                 item { EmptyCard(onAdd) }
@@ -132,7 +132,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun CredentialsCard(onSettings: () -> Unit) {
+private fun OptionalApiCard(onSettings: () -> Unit) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
@@ -147,14 +147,16 @@ private fun CredentialsCard(onSettings: () -> Unit) {
                 Icon(Icons.Rounded.Key, contentDescription = null)
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "需要 API 凭据",
+                    "当前为匿名网页模式",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
-            Text("Rule34 的 API 请求需要 User ID 与 API Key。凭据只加密保存在本机。")
+            Text(
+                "无需 API 也可以下载。配置自己的 User ID 与 API Key 后，会优先使用更快、更稳定的 API 模式。",
+            )
             FilledTonalButton(onClick = onSettings) {
-                Text("去设置")
+                Text("可选：配置 API")
             }
         }
     }
@@ -187,12 +189,12 @@ private fun EmptyCard(onAdd: () -> Unit) {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "粘贴任意 Rule34 帖子链接，识别其中的 artist tag，并把该作者原文件下载到独立目录。",
+                "直接输入 artist tag，或粘贴 Rule34 帖子/作者搜索链接，然后把该作者原文件下载到独立目录。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             FilledTonalButton(onClick = onAdd) {
-                Text("从帖子添加")
+                Text("添加作者")
             }
         }
     }

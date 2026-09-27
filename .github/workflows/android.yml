@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -22,9 +22,19 @@ jobs:
           cache-provider: basic
       - name: Unit tests and debug build
         run: ./gradlew --stacktrace testDebugUnitTest assembleDebug
-      - name: Upload debug APK
+      - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: rule34-Downloader-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+      - name: Prepare versioned debug APK
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[release-debug]')
+        run: cp app/build/outputs/apk/debug/app-debug.apk rule34-Downloader-v1.1.0-debug.apk
+      - name: Publish debug GitHub Release
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[release-debug]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete debug-v1.1.0 --cleanup-tag --yes || true
+          gh release create debug-v1.1.0 rule34-Downloader-v1.1.0-debug.apk             --target "$GITHUB_SHA"             --title "rule34-Downloader v1.1.0 Debug"             --notes "Debug build: direct artist-tag input, pasted Rule34 links, and anonymous web fallback when API credentials are not configured."             --prerelease

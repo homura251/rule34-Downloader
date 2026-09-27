@@ -56,7 +56,7 @@ fun DownloaderApp(
             state = addState,
             onDismiss = viewModel::closeAddAuthor,
             onInputChange = viewModel::updateAddInput,
-            onResolve = viewModel::resolvePostArtists,
+            onResolve = viewModel::resolveAuthorInput,
             onSelect = viewModel::selectArtist,
             onConfirm = viewModel::subscribeSelectedArtist,
         )

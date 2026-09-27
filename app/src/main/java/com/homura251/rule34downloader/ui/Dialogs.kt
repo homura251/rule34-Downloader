@@ -58,19 +58,19 @@ fun AddAuthorDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("从帖子识别作者") },
+        title = { Text("添加作者") },
         text = {
             Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "粘贴帖子 URL 或数字 ID。这里只读取元数据，不展示图片预览。",
+                    "可以直接输入单个 artist tag，也可以粘贴帖子链接、帖子 ID 或单作者搜索链接。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
                     value = state.input,
                     onValueChange = onInputChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("帖子 URL / ID") },
-                    placeholder = { Text("…page=post&s=view&id=18875738") },
+                    label = { Text("artist tag / Rule34 链接 / Post ID") },
+                    placeholder = { Text("savvyraexo") },
                     enabled = !state.resolving,
                     singleLine = true,
                 )
@@ -78,7 +78,7 @@ fun AddAuthorDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
-                        Text("正在读取 artist tag…")
+                        Text("正在读取帖子中的 artist tag…")
                     }
                 }
                 AnimatedVisibility(!state.error.isNullOrBlank()) {
@@ -116,7 +116,11 @@ fun AddAuthorDialog(
                                     Column {
                                         Text(candidate.name, fontWeight = FontWeight.Medium)
                                         Text(
-                                            "站内约 ${candidate.count} 个帖子",
+                                            if (candidate.count > 0L) {
+                                                "站内约 ${candidate.count} 个帖子"
+                                            } else {
+                                                "artist tag"
+                                            },
                                             style = MaterialTheme.typography.bodySmall,
                                         )
                                     }
@@ -133,7 +137,7 @@ fun AddAuthorDialog(
                 enabled = !state.resolving &&
                     if (state.candidates.isEmpty()) state.input.isNotBlank() else state.selectedArtist != null,
             ) {
-                Text(if (state.candidates.isEmpty()) "识别作者" else "添加并下载")
+                Text(if (state.candidates.isEmpty()) "继续" else "添加并下载")
             }
         },
         dismissButton = {
@@ -167,15 +171,23 @@ fun SettingsDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    "API 凭据用 Android Keystore 加密，仅保存在本机。",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Text(
+                        "API 凭据是可选的。两个字段都留空时使用匿名网页模式；" +
+                            "匿名模式会逐条解析帖子详情，因此更慢，也更容易遇到站点限流。配置 API 后会自动优先使用 API。",
+                        Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
                 OutlinedTextField(
                     value = draft.userId,
                     onValueChange = { draft = draft.copy(userId = it) },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("User ID") },
+                    label = { Text("User ID（可选）") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                 )
@@ -183,7 +195,7 @@ fun SettingsDialog(
                     value = draft.apiKey,
                     onValueChange = { draft = draft.copy(apiKey = it) },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("API Key") },
+                    label = { Text("API Key（可选）") },
                     singleLine = true,
                     visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
@@ -195,6 +207,11 @@ fun SettingsDialog(
                         }
                     },
                 )
+                Text(
+                    "填写时必须同时提供 User ID 与 API Key；凭据用 Android Keystore 加密，仅保存在本机。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -202,7 +219,7 @@ fun SettingsDialog(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text("自动增量同步", fontWeight = FontWeight.SemiBold)
-                        Text("定期只检查并下载新帖子", style = MaterialTheme.typography.bodySmall)
+                        Text("API 与匿名模式都支持", style = MaterialTheme.typography.bodySmall)
                     }
                     Switch(
                         checked = draft.autoSyncEnabled,

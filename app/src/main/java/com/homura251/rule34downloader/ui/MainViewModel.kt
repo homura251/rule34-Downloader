@@ -10,6 +10,7 @@ import com.homura251.rule34downloader.data.Rule34Database
 import com.homura251.rule34downloader.data.Rule34Tag
 import com.homura251.rule34downloader.network.PostUrlParser
 import com.homura251.rule34downloader.network.Rule34Client
+import com.homura251.rule34downloader.network.Rule34HtmlClient
 import com.homura251.rule34downloader.work.SyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -79,11 +80,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openAddAuthor() {
-        if (!credentialsStore.isConfigured()) {
-            eventsChannel.trySend(UiEvent.Message("请先配置 Rule34 API User ID 与 API Key。"))
-            openSettings()
-            return
-        }
         _addAuthorState.value = AddAuthorState(open = true)
     }
 
@@ -105,16 +101,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _addAuthorState.value = _addAuthorState.value.copy(selectedArtist = tag)
     }
 
-    fun resolvePostArtists() {
+    fun resolveAuthorInput() {
         val current = _addAuthorState.value
-        val postId = PostUrlParser.parsePostId(current.input)
-        if (postId == null) {
-            _addAuthorState.value = current.copy(error = "请输入有效的 Rule34 帖子 URL 或数字 ID。")
+        val input = current.input.trim()
+        if (input.isEmpty()) {
+            _addAuthorState.value = current.copy(error = "请输入 artist tag、帖子链接或帖子 ID。")
             return
         }
-        val credentials = credentialsStore.get()
-        if (credentials == null) {
-            _addAuthorState.value = current.copy(error = "API 凭据尚未配置。")
+
+        val postId = PostUrlParser.parsePostId(input)
+        if (postId == null) {
+            val tag = PostUrlParser.parseArtistTag(input)
+            if (tag == null) {
+                _addAuthorState.value = current.copy(
+                    error = "无法识别输入。请输入单个 artist tag，或粘贴 Rule34 帖子/作者搜索链接。",
+                )
+                return
+            }
+            _addAuthorState.value = current.copy(
+                sourcePostId = 0L,
+                candidates = listOf(
+                    Rule34Tag(
+                        name = tag,
+                        type = Rule34Client.ARTIST_TAG_TYPE,
+                        count = 0L,
+                    ),
+                ),
+                selectedArtist = tag,
+                error = null,
+            )
             return
         }
 
@@ -126,16 +141,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                val client = Rule34Client(credentials)
-                val post = client.getPost(postId)
-                post to client.resolveArtistTags(post.tags)
-            }.onSuccess { (post, artists) ->
+                val credentials = credentialsStore.get()
+                if (credentials != null) {
+                    val client = Rule34Client(credentials)
+                    val post = client.getPost(postId)
+                    post.id to client.resolveArtistTags(post.tags)
+                } else {
+                    val resolved = Rule34HtmlClient().getPostWithArtists(postId)
+                    resolved.post.id to resolved.artists
+                }
+            }.onSuccess { (resolvedPostId, artists) ->
                 _addAuthorState.value = _addAuthorState.value.copy(
                     resolving = false,
-                    sourcePostId = post.id,
+                    sourcePostId = resolvedPostId,
                     candidates = artists,
                     selectedArtist = artists.singleOrNull()?.name,
-                    error = if (artists.isEmpty()) "这个帖子没有可识别的 artist tag。" else null,
+                    error = if (artists.isEmpty()) {
+                        "这个帖子没有识别到 artist tag；也可以直接输入作者 tag 添加。"
+                    } else {
+                        null
+                    },
                 )
             }.onFailure { error ->
                 _addAuthorState.value = _addAuthorState.value.copy(
@@ -148,24 +173,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun subscribeSelectedArtist() {
         val current = _addAuthorState.value
-        val postId = current.sourcePostId ?: return
         val tag = current.selectedArtist ?: return
+        val postId = current.sourcePostId ?: 0L
         val added = database.addArtist(tag, postId)
         closeAddAuthor()
         if (added) {
             SyncScheduler.enqueueArtistSync(getApplication(), tag)
-            eventsChannel.trySend(UiEvent.Message("已添加 $tag，开始下载全部原文件。"))
+            val mode = if (credentialsStore.isConfigured()) "API" else "匿名网页"
+            eventsChannel.trySend(UiEvent.Message("已添加 $tag，使用$mode模式开始同步。"))
         } else {
             eventsChannel.trySend(UiEvent.Message("$tag 已在作者列表中。"))
         }
     }
 
     fun syncArtist(tag: String) {
-        if (!credentialsStore.isConfigured()) {
-            eventsChannel.trySend(UiEvent.Message("请先配置 API 凭据。"))
-            openSettings()
-            return
-        }
         SyncScheduler.enqueueArtistSync(getApplication(), tag)
     }
 
@@ -178,18 +199,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSettings(state: SettingsState) {
         val userId = state.userId.trim()
         val apiKey = state.apiKey.trim()
-        if (userId.isEmpty() || apiKey.isEmpty()) {
-            eventsChannel.trySend(UiEvent.Message("User ID 与 API Key 都不能为空。"))
-            return
+        when {
+            userId.isEmpty() && apiKey.isEmpty() -> credentialsStore.clear()
+            userId.isEmpty() || apiKey.isEmpty() -> {
+                eventsChannel.trySend(
+                    UiEvent.Message("要么同时填写 User ID 与 API Key，要么两个都留空使用匿名模式。"),
+                )
+                return
+            }
+            else -> credentialsStore.save(ApiCredentials(userId = userId, apiKey = apiKey))
         }
-        credentialsStore.save(ApiCredentials(userId = userId, apiKey = apiKey))
+
         preferences.autoSyncEnabled = state.autoSyncEnabled
         preferences.syncIntervalMinutes = state.syncIntervalMinutes
         preferences.wifiOnly = state.wifiOnly
         SyncScheduler.ensurePeriodicSchedule(getApplication())
         _settings.value = loadSettings()
         _showSettings.value = false
-        eventsChannel.trySend(UiEvent.Message("设置已保存。"))
+        eventsChannel.trySend(
+            UiEvent.Message(
+                if (credentialsStore.isConfigured()) {
+                    "设置已保存，优先使用 API 模式。"
+                } else {
+                    "设置已保存，当前使用匿名网页模式。"
+                },
+            ),
+        )
     }
 
     private fun loadSettings(): SettingsState {

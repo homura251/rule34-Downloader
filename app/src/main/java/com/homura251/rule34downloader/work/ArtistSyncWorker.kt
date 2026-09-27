@@ -6,9 +6,11 @@ import androidx.work.WorkerParameters
 import com.homura251.rule34downloader.data.CredentialsStore
 import com.homura251.rule34downloader.data.Rule34Database
 import com.homura251.rule34downloader.data.SyncState
+import com.homura251.rule34downloader.network.ApiException
 import com.homura251.rule34downloader.network.AuthException
 import com.homura251.rule34downloader.network.RetryableApiException
 import com.homura251.rule34downloader.network.Rule34Client
+import com.homura251.rule34downloader.network.Rule34HtmlClient
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -29,18 +31,15 @@ class ArtistSyncWorker(
         val database = Rule34Database.getInstance(applicationContext)
         val artist = database.getArtist(artistTag) ?: return@withContext Result.success()
         val credentials = CredentialsStore(applicationContext).get()
-        if (credentials == null) {
-            database.setSyncState(
-                artistTag,
-                SyncState.ERROR,
-                error = "请先在设置中填写 Rule34 API 凭据。",
-                markSyncTime = true,
-            )
-            return@withContext Result.failure()
+        val apiClient = credentials?.let(::Rule34Client)
+        val htmlClient = if (credentials == null) Rule34HtmlClient() else null
+        val pageSize = if (apiClient != null) {
+            Rule34Client.MAX_POSTS_PER_PAGE
+        } else {
+            Rule34HtmlClient.POSTS_PER_PAGE
         }
 
         val notifications = DownloadNotifications(applicationContext)
-        val client = Rule34Client(credentials)
         val downloader = MediaStoreDownloader(applicationContext)
         database.setSyncState(artistTag, SyncState.SYNCING)
         setForeground(notifications.foregroundInfo(artistTag, 0, 0))
@@ -50,17 +49,22 @@ class ArtistSyncWorker(
             var maxSeen = artist.lastSeenPostId
             do {
                 coroutineContext.ensureActive()
-                val posts = client.searchPosts(
+                val posts = apiClient?.searchPosts(
                     artistTag = artistTag,
                     afterPostId = artist.lastSeenPostId,
                     page = page,
                     limit = Rule34Client.MAX_POSTS_PER_PAGE,
+                ) ?: htmlClient!!.searchPosts(
+                    artistTag = artistTag,
+                    afterPostId = artist.lastSeenPostId,
+                    page = page,
                 )
+
                 database.insertDiscoveredPosts(artistTag, posts)
                 posts.maxOfOrNull { it.id }?.let { maxSeen = maxOf(maxSeen, it) }
                 page++
-                if (posts.size < Rule34Client.MAX_POSTS_PER_PAGE) break
-                delay(API_PAGE_DELAY_MS)
+                if (posts.size < pageSize) break
+                delay(if (apiClient != null) API_PAGE_DELAY_MS else HTML_PAGE_DELAY_MS)
             } while (true)
 
             if (maxSeen > artist.lastSeenPostId) {
@@ -140,6 +144,14 @@ class ArtistSyncWorker(
                 markSyncTime = true,
             )
             Result.retry()
+        } catch (e: ApiException) {
+            database.setSyncState(
+                artistTag,
+                SyncState.ERROR,
+                error = e.message,
+                markSyncTime = true,
+            )
+            Result.failure()
         } catch (e: InterruptedIOException) {
             database.setSyncState(
                 artistTag,
@@ -161,6 +173,7 @@ class ArtistSyncWorker(
     companion object {
         const val KEY_ARTIST_TAG = "artist_tag"
         private const val API_PAGE_DELAY_MS = 250L
+        private const val HTML_PAGE_DELAY_MS = 1_000L
         private const val PROGRESS_UPDATE_INTERVAL_MS = 500L
         private const val MAX_FILE_RETRY_RUNS = 3
     }
