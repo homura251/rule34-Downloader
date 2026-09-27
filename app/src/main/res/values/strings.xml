@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Rule34 Downloader</string>
+    <string name="notification_channel_downloads">下载与同步</string>
+    <string name="notification_channel_downloads_description">作者作品同步、下载进度与完成提示</string>
+</resources>
