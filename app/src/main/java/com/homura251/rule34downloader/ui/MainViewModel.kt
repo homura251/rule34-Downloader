@@ -180,7 +180,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (added) {
             SyncScheduler.enqueueArtistSync(getApplication(), tag)
             val mode = if (credentialsStore.isConfigured()) "API" else "匿名网页"
-            eventsChannel.trySend(UiEvent.Message("已添加 $tag，使用$mode模式开始同步。"))
+            eventsChannel.trySend(UiEvent.Message("已添加 $tag，使用${mode}模式开始同步。"))
         } else {
             eventsChannel.trySend(UiEvent.Message("$tag 已在作者列表中。"))
         }
