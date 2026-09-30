@@ -8,9 +8,12 @@ import com.homura251.rule34downloader.data.Rule34Database
 import com.homura251.rule34downloader.data.SyncState
 import com.homura251.rule34downloader.network.ApiException
 import com.homura251.rule34downloader.network.AuthException
+import com.homura251.rule34downloader.network.CloudflareChallengeException
+import com.homura251.rule34downloader.network.HtmlChallengeException
 import com.homura251.rule34downloader.network.RetryableApiException
 import com.homura251.rule34downloader.network.Rule34Client
 import com.homura251.rule34downloader.network.Rule34HtmlClient
+import com.homura251.rule34downloader.network.Rule34Network
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -32,7 +35,6 @@ class ArtistSyncWorker(
         val artist = database.getArtist(artistTag) ?: return@withContext Result.success()
         val credentials = CredentialsStore(applicationContext).get()
         val apiClient = credentials?.let(::Rule34Client)
-        val htmlClient = if (credentials == null) Rule34HtmlClient() else null
         val pageSize = if (apiClient != null) {
             Rule34Client.MAX_POSTS_PER_PAGE
         } else {
@@ -40,11 +42,16 @@ class ArtistSyncWorker(
         }
 
         val notifications = DownloadNotifications(applicationContext)
-        val downloader = MediaStoreDownloader(applicationContext)
         database.setSyncState(artistTag, SyncState.SYNCING)
         setForeground(notifications.foregroundInfo(artistTag, 0, 0))
 
         try {
+            val htmlClient = if (credentials == null) {
+                Rule34HtmlClient(Rule34Network.get(applicationContext).client)
+            } else {
+                null
+            }
+            val downloader = MediaStoreDownloader(applicationContext)
             var page = 0
             var maxSeen = artist.lastSeenPostId
             do {
@@ -102,6 +109,9 @@ class ArtistSyncWorker(
                     if (!result.existed) downloadedThisRun++
                 } catch (e: InterruptedIOException) {
                     throw e
+                } catch (e: CloudflareChallengeException) {
+                    database.markFailed(artistTag, record.postId, e.message.orEmpty())
+                    throw HtmlChallengeException(e.message.orEmpty(), e)
                 } catch (e: Exception) {
                     failed++
                     database.markFailed(

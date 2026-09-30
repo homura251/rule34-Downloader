@@ -19,7 +19,7 @@
 - WorkManager 支持手动同步和可选的 15 分钟 / 1 小时 / 6 小时 / 24 小时后台检查。
 - Material Design 3 / Material You：Android 12+ 动态配色、状态切换动画、文件级进度、Snackbar 与完成通知。
 - API User ID / API Key 使用 Android Keystore AES-GCM 加密后仅保存在本机。
-- 匿名模式遇到 HTTP 429 / Cloudflare 验证时会给出明确错误，不会申请浏览器、Cookie 或额外 Android 权限绕过验证。
+- 匿名网页与原文件下载共享 WebView Cookie 和 User-Agent；Cloudflare 验证会先尝试通过内置 WebView 完成，需要手动操作时可从设置进入“网页验证”。不增加 Android 权限。
 
 ## 使用
 
@@ -37,9 +37,12 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 2. 逐条读取帖子详情页。
 3. 从详情页 Options / `.link-list` 的 “Original image” 获取原文件 URL。
 4. 从 `#tag-sidebar .tag-type-artist` 识别帖子中的 artist tag。
-5. 对匿名请求主动限速；遇到 429 / Cloudflare challenge 时停止并提示稍后重试或配置 API。
+5. 对匿名请求主动限速；普通 429 / 服务端错误使用退避重试。检测到 Cloudflare challenge 时，通过主线程 WebView 尝试完成验证，最多等待 30 秒，再携带共享 Cookie 重试原请求一次。
+6. 需要点击或无法自动完成的验证：打开设置 → “网页验证”，完成后重新同步。验证会话仅保存在本机，并供后续网页请求和原文件下载复用。验证页不加载帖子图片。
 
-因此匿名模式可用，但首次同步作品很多的作者会明显慢于 API 模式。
+首次同步作品很多的作者会明显慢于 API 模式。验证仍受站点策略和系统 WebView 版本影响；验证超时会明确提示，不会无限重试或把验证网页保存为原文件。
+
+实现参考 [Tachiyomi CloudflareInterceptor](https://github.com/izfaruqi/tachiyomi/blob/master/app/src/main/java/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt) 的 WebView / Cookie / 重试流程；同时使用 `cf-mitigated: challenge` 和旧验证页特征识别挑战，避免把普通限流当作验证。
 
 ## 存储与权限
 
@@ -90,7 +93,7 @@ app/src/main/java/com/homura251/rule34downloader/
 - 用户直接输入 artist tag 时将该 tag 视为用户明确选择，不额外要求 API 验证。
 - 移除作者只停止跟踪，不删除已经保存到 Downloads 的文件。
 - 自动同步依赖 WorkManager，系统可能因省电策略延后执行；15 分钟是周期任务允许的最小间隔。
-- 匿名网页模式遵守站点响应；不会尝试绕过 Cloudflare/验证码。
+- 匿名模式保留请求限速；交互验证由用户在 WebView 中完成，后台任务不会主动弹出页面。
 
 ## License
 

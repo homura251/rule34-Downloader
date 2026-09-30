@@ -151,6 +151,7 @@ fun SettingsDialog(
     initial: SettingsState,
     onDismiss: () -> Unit,
     onSave: (SettingsState) -> Unit,
+    onVerifyWeb: () -> Unit,
 ) {
     var draft by remember(initial) { mutableStateOf(initial) }
     var showKey by remember { mutableStateOf(false) }
@@ -183,6 +184,14 @@ fun SettingsDialog(
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                 }
+                TextButton(onClick = onVerifyWeb) {
+                    Text("网页验证")
+                }
+                Text(
+                    "匿名模式遇到 Cloudflare 人机验证时，在这里完成验证，再重新同步。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedTextField(
                     value = draft.userId,
                     onValueChange = { draft = draft.copy(userId = it) },

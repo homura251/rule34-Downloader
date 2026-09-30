@@ -11,6 +11,7 @@ import com.homura251.rule34downloader.data.Rule34Tag
 import com.homura251.rule34downloader.network.PostUrlParser
 import com.homura251.rule34downloader.network.Rule34Client
 import com.homura251.rule34downloader.network.Rule34HtmlClient
+import com.homura251.rule34downloader.network.Rule34Network
 import com.homura251.rule34downloader.work.SyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -147,7 +148,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val post = client.getPost(postId)
                     post.id to client.resolveArtistTags(post.tags)
                 } else {
-                    val resolved = Rule34HtmlClient().getPostWithArtists(postId)
+                    val resolved = Rule34HtmlClient(Rule34Network.get(getApplication()).client)
+                        .getPostWithArtists(postId)
                     resolved.post.id to resolved.artists
                 }
             }.onSuccess { (resolvedPostId, artists) ->
