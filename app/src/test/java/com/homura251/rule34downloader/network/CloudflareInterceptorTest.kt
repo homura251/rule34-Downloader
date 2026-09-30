@@ -107,6 +107,29 @@ class CloudflareInterceptorTest {
         assertEquals(2, server.requestCount)
     }
 
+    @Test fun verifiesTheFinalRedirectUrlAndUsesItsScopedCookie() {
+        val redirect = { MockResponse().setResponseCode(302).setHeader("Location", server.url("/protected/file.png")) }
+        server.enqueue(redirect())
+        server.enqueue(challenge())
+        server.enqueue(redirect())
+        server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody("original file"))
+        val client = client(resolve = { request ->
+            assertEquals("/protected/file.png", request.url.encodedPath)
+            resolutions++
+            cookies.saveFromResponse(request.url, listOf(
+                Cookie.Builder().hostOnlyDomain(request.url.host).path("/protected/")
+                    .name("cf_clearance").value("verified").build(),
+            ))
+        })
+        client.newCall(Request.Builder().url(server.url("/original")).build()).execute().use {
+            assertEquals("original file", it.body!!.string())
+        }
+        val requests = (1..4).map { server.takeRequest(1, TimeUnit.SECONDS)!! }
+        assertEquals(1, resolutions)
+        assertEquals(null, requests[2].getHeader("Cookie"))
+        assertEquals("cf_clearance=verified", requests[3].getHeader("Cookie"))
+    }
+
     @Test fun failedVerificationDoesNotRetryTheRequest() {
         server.enqueue(challenge())
         val client = client(resolve = { throw CloudflareChallengeException() })
@@ -128,10 +151,15 @@ class CloudflareInterceptorTest {
         assertEquals(2, server.requestCount)
     }
 
-    @Test fun concurrentChallengesReuseOneClearanceRefresh() {
+    @Test fun concurrentRedirectedChallengesReuseOneClearanceRefresh() {
         val originalRequests = CountDownLatch(2)
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.path.orEmpty().startsWith("/original/")) {
+                    return MockResponse().setResponseCode(302).setHeader(
+                        "Location", server.url("/post/${request.path!!.substringAfterLast('/')}"),
+                    )
+                }
                 if (request.getHeader("Cookie") == "cf_clearance=verified") {
                     return MockResponse().setBody("verified")
                 }
@@ -146,13 +174,13 @@ class CloudflareInterceptorTest {
         val executor = Executors.newFixedThreadPool(2)
         try {
             val downloads = (1..2).map { index -> executor.submit<String> {
-                client.newCall(Request.Builder().url(server.url("/post/$index")).build()).execute().use {
+                client.newCall(Request.Builder().url(server.url("/original/$index")).build()).execute().use {
                     it.body!!.string()
                 }
             } }
             downloads.forEach { assertEquals("verified", it.get(5, TimeUnit.SECONDS)) }
             assertEquals(1, resolutions)
-            assertEquals(4, server.requestCount)
+            assertEquals(8, server.requestCount)
         } finally {
             executor.shutdownNow()
         }

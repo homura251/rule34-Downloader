@@ -17,19 +17,32 @@ class CloudflareInterceptor(
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        val previousClearance = clearanceCookie(request.url)
+        val originalClearance = clearanceCookie(request.url)
         val response = chain.proceed(request)
-        if (request.method != "GET" || !canResolve(request.url) || !isChallenge(response)) {
+        val challengeRequest = response.request
+        if (request.method != "GET" || !canResolve(challengeRequest.url) || !isChallenge(response)) {
             return response
+        }
+        // Redirects may challenge a different host/path. Verify the final URL,
+        // while retaining the original URL for the one bounded retry.
+        val networkRequest = response.networkResponse?.request
+        val previousClearance = if (networkRequest != null) {
+            // Use the cookie actually sent on the final hop, not one another
+            // concurrent request may have refreshed since its response arrived.
+            networkRequest.header("Cookie").orEmpty().split(';').map(String::trim)
+                .firstOrNull { it.substringBefore('=') == "cf_clearance" }
+                ?.substringAfter('=')
+        } else {
+            originalClearance
         }
         response.close()
 
         synchronized(challengeLock) {
             // Another request may already have refreshed the shared clearance.
-            val currentClearance = clearanceCookie(request.url)
+            val currentClearance = clearanceCookie(challengeRequest.url)
             if (currentClearance == null || currentClearance == previousClearance) {
                 try {
-                    resolveChallenge(request)
+                    resolveChallenge(challengeRequest)
                 } catch (e: IOException) {
                     throw e
                 } catch (e: Exception) {
