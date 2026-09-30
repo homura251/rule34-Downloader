@@ -18,6 +18,7 @@ fun DownloaderApp(
 ) {
     val context = LocalContext.current
     val artists by viewModel.artists.collectAsStateWithLifecycle()
+    val gallery by viewModel.gallery.collectAsStateWithLifecycle()
     val addState by viewModel.addAuthorState.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val showSettings by viewModel.showSettings.collectAsStateWithLifecycle()
@@ -44,7 +45,19 @@ fun DownloaderApp(
         previousStates.keys.filterNot(active::contains).forEach(previousStates::remove)
     }
 
-    HomeScreen(
+    val galleryArtist = gallery.artistTag
+    if (galleryArtist != null) {
+        ArtistGalleryScreen(
+            state = gallery,
+            syncing = artists.any { it.tag == galleryArtist && it.syncState == SyncState.SYNCING },
+            snackbarHostState = snackbarHostState,
+            onBack = viewModel::closeGallery,
+            onSync = { viewModel.syncArtist(galleryArtist) },
+            onSettings = viewModel::openSettings,
+            onLoadMore = viewModel::loadMoreGallery,
+            onRetry = viewModel::retryGallery,
+        )
+    } else HomeScreen(
         artists = artists,
         credentialsConfigured = viewModel.credentialsConfigured,
         snackbarHostState = snackbarHostState,
@@ -52,6 +65,7 @@ fun DownloaderApp(
         onAdd = viewModel::openAddAuthor,
         onSync = viewModel::syncArtist,
         onRemove = viewModel::removeArtist,
+        onBrowse = viewModel::openGallery,
     )
 
     if (addState.open) {

@@ -8,12 +8,15 @@ import com.homura251.rule34downloader.data.AppPreferences
 import com.homura251.rule34downloader.data.CredentialsStore
 import com.homura251.rule34downloader.data.Rule34Database
 import com.homura251.rule34downloader.data.Rule34Tag
+import com.homura251.rule34downloader.data.GalleryPost
 import com.homura251.rule34downloader.network.PostUrlParser
 import com.homura251.rule34downloader.network.Rule34Client
 import com.homura251.rule34downloader.network.Rule34HtmlClient
 import com.homura251.rule34downloader.network.Rule34Network
 import com.homura251.rule34downloader.work.SyncScheduler
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,10 +48,22 @@ sealed interface UiEvent {
     data class Message(val text: String) : UiEvent
 }
 
+data class GalleryState(
+    val artistTag: String? = null,
+    val posts: List<GalleryPost> = emptyList(),
+    val totalCount: Int = 0,
+    val loading: Boolean = false,
+    val error: String? = null,
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val database = Rule34Database.getInstance(application)
     private val credentialsStore = CredentialsStore(application)
     private val preferences = AppPreferences(application)
+    private val _gallery = MutableStateFlow(GalleryState())
+    val gallery: StateFlow<GalleryState> = _gallery.asStateFlow()
+    private var galleryJob: Job? = null
+    private var galleryLimit = GALLERY_PAGE_SIZE
 
     val artists = database.observeArtistSummaries().stateIn(
         viewModelScope,
@@ -192,6 +207,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SyncScheduler.enqueueArtistSync(getApplication(), tag)
     }
 
+    fun openGallery(tag: String) {
+        galleryLimit = GALLERY_PAGE_SIZE
+        _gallery.value = GalleryState(artistTag = tag, loading = true)
+        observeGallery(tag)
+    }
+
+    fun closeGallery() {
+        galleryJob?.cancel()
+        _gallery.value = GalleryState()
+    }
+
+    fun loadMoreGallery() {
+        val tag = _gallery.value.artistTag ?: return
+        if (_gallery.value.loading || _gallery.value.posts.size >= _gallery.value.totalCount) return
+        galleryLimit += GALLERY_PAGE_SIZE
+        _gallery.value = _gallery.value.copy(loading = true, error = null)
+        observeGallery(tag)
+    }
+
+    fun retryGallery() {
+        val tag = _gallery.value.artistTag ?: return
+        _gallery.value = _gallery.value.copy(loading = true, error = null)
+        observeGallery(tag)
+    }
+
+    private fun observeGallery(tag: String) {
+        galleryJob?.cancel()
+        val limit = galleryLimit
+        galleryJob = viewModelScope.launch {
+            try {
+                database.observeGallery(tag, limit).collect { page ->
+                    _gallery.value = GalleryState(tag, page.posts, page.totalCount)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _gallery.value = _gallery.value.copy(loading = false, error = e.message ?: "读取作品失败。")
+            }
+        }
+    }
+
     fun removeArtist(tag: String) {
         SyncScheduler.cancelArtistSync(getApplication(), tag)
         database.removeArtist(tag)
@@ -238,5 +294,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             syncIntervalMinutes = preferences.syncIntervalMinutes,
             wifiOnly = preferences.wifiOnly,
         )
+    }
+
+    companion object {
+        private const val GALLERY_PAGE_SIZE = 60
     }
 }

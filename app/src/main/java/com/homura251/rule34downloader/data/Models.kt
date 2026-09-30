@@ -1,5 +1,7 @@
 package com.homura251.rule34downloader.data
 
+import java.net.URI
+
 enum class SyncState {
     IDLE,
     SYNCING,
@@ -26,6 +28,7 @@ data class Rule34Post(
     val tags: List<String>,
     val width: Int? = null,
     val height: Int? = null,
+    val previewUrl: String? = null,
 )
 
 data class Rule34Tag(
@@ -73,4 +76,32 @@ data class DownloadRecord(
     val status: DownloadStatus,
     val bytesDownloaded: Long,
     val totalBytes: Long,
+)
+
+data class GalleryPost(
+    val artistTag: String,
+    val postId: Long,
+    val fileUrl: String,
+    val previewUrl: String?,
+    val localUri: String?,
+    val status: DownloadStatus,
+) {
+    val isVideo: Boolean
+        get() = runCatching {
+            URI(fileUrl).path.substringAfterLast('.').lowercase() in setOf("mp4", "webm", "m4v", "mov")
+        }.getOrDefault(false)
+
+    val postUrl: String
+        get() = "https://rule34.xxx/index.php?page=post&s=view&id=$postId"
+
+    fun imageSource(fullSize: Boolean, skipLocal: Boolean = false): String? {
+        if (isVideo) return if (fullSize) null else previewUrl?.takeIf(String::isNotBlank)
+        if (!skipLocal && !localUri.isNullOrBlank()) return localUri
+        return if (fullSize) fileUrl else previewUrl?.takeIf(String::isNotBlank) ?: fileUrl
+    }
+}
+
+data class GalleryPage(
+    val posts: List<GalleryPost>,
+    val totalCount: Int,
 )
