@@ -5,6 +5,9 @@ import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 
 // Follows Tachiyomi's flow: close the challenge response, resolve in a WebView,
 // then retry with the same User-Agent and the WebView's cookies.
@@ -12,8 +15,9 @@ class CloudflareInterceptor(
     private val clearanceCookie: (HttpUrl) -> String?,
     private val resolveChallenge: (Request) -> Unit,
     private val canResolve: (HttpUrl) -> Boolean = ::isRule34Url,
+    private val resolveWithCancellation: ((Request, () -> Unit) -> Unit)? = null,
 ) : Interceptor {
-    private val challengeLock = Any()
+    private val challengeLock = ReentrantLock()
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -37,21 +41,28 @@ class CloudflareInterceptor(
         }
         response.close()
 
-        synchronized(challengeLock) {
+        fun checkActive() {
+            if (chain.call().isCanceled()) throw InterruptedIOException("网页验证已取消")
+        }
+        while (!challengeLock.tryLock(100, TimeUnit.MILLISECONDS)) checkActive()
+        try {
+            checkActive()
             // Another request may already have refreshed the shared clearance.
             val currentClearance = clearanceCookie(challengeRequest.url)
             if (currentClearance == null || currentClearance == previousClearance) {
                 try {
-                    resolveChallenge(challengeRequest)
+                    if (resolveWithCancellation != null) resolveWithCancellation.invoke(challengeRequest, ::checkActive)
+                    else resolveChallenge(challengeRequest)
                 } catch (e: IOException) {
                     throw e
                 } catch (e: Exception) {
                     throw CloudflareChallengeException(cause = e)
                 }
             }
-        }
+        } finally { challengeLock.unlock() }
 
         // Retry only once, including when the server rejects the new cookie.
+        checkActive()
         val retry = chain.proceed(request)
         if (isChallenge(retry)) {
             retry.close()

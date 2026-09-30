@@ -84,6 +84,8 @@ data class DownloadRecord(
     val status: DownloadStatus,
     val bytesDownloaded: Long,
     val totalBytes: Long,
+    val localUri: String? = null,
+    val verifiedMd5: String? = null,
 )
 
 data class GalleryPost(

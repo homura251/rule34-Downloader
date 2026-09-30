@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 object SyncScheduler {
     private const val PERIODIC_SYNC_NAME = "rule34-periodic-discovery"
 
-    fun enqueueArtistSync(context: Context, artistTag: String, resume: Boolean = false) {
+    fun enqueueArtistSync(context: Context, artistTag: String, resume: Boolean = false, replace: Boolean = false) {
         val database = Rule34Database.getInstance(context)
         if (resume && !database.resumeSync(artistTag)) return
         if (database.isPaused(artistTag)) return
@@ -30,9 +30,17 @@ object SyncScheduler {
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             artistWorkName(artistTag),
-            if (resume) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+            if (resume || replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
             request,
         )
+    }
+
+    fun restartAfterFolderChange(context: Context) {
+        for (tag in SyncControls.activeTags()) {
+            if (Rule34Database.getInstance(context).isPaused(tag)) continue
+            SyncControls.pause(tag)
+            enqueueArtistSync(context, tag, replace = true)
+        }
     }
 
     fun cancelArtistSync(context: Context, artistTag: String) {

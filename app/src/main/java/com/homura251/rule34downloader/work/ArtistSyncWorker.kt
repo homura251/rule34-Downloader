@@ -24,6 +24,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
@@ -31,27 +32,44 @@ class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : Co
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val artistTag = inputData.getString(KEY_ARTIST_TAG)?.trim().orEmpty()
         if (artistTag.isEmpty()) return@withContext Result.failure()
+        // Also serialize tags that sanitize to the same physical folder.
+        SyncControls.gate(MediaStoreDownloader.buildRelativePath(artistTag)).withLock { syncArtist(artistTag) }
+    }
+
+    private suspend fun syncArtist(artistTag: String): Result {
+        coroutineContext.ensureActive()
         val database = Rule34Database.getInstance(applicationContext)
-        val artist = database.getArtist(artistTag) ?: return@withContext Result.success()
+        val artist = database.getArtist(artistTag) ?: return Result.success()
         if (artist.paused) {
             database.finishPaused(artistTag)
-            return@withContext Result.success()
+            return Result.success()
         }
         val workContext = coroutineContext
         val control = SyncControl { workContext.ensureActive() }
         SyncControls.register(artistTag, control)
         val notifications = DownloadNotifications(applicationContext)
-        try {
-            if (!database.setSyncState(artistTag, SyncState.SYNCING)) return@withContext Result.success()
+        return try {
+            if (!database.setSyncState(artistTag, SyncState.SYNCING)) return Result.success()
             setForeground(notifications.foregroundInfo(artistTag, 0, 0))
-            val http = Rule34Network.get(applicationContext).client.newBuilder()
+            val network = Rule34Network.get(applicationContext)
+            val http = network.client.newBuilder()
                 .addInterceptor(control.interceptor).build()
             val credentials = CredentialsStore(applicationContext).get()
             val api = credentials?.let { Rule34Client(it, control::checkActive) { connection -> control.register(connection::disconnect) } }
-            val html = Rule34HtmlClient(http, control::checkActive)
+            val html = network.htmlClient(http, control::checkActive)
             val pageSize = if (api != null) Rule34Client.MAX_POSTS_PER_PAGE else Rule34HtmlClient.POSTS_PER_PAGE
+            val downloader = MediaStoreDownloader(applicationContext, http, control::checkActive, control::register)
+            downloader.cleanInterruptedFiles(artistTag)
+            database.resetInProgress(artistTag)
             val existing = ExistingDownloads(applicationContext, artistTag, control::checkActive)
-            val downloader = MediaStoreDownloader(applicationContext, http)
+            // Repair revoked/unreadable URIs and check completions from older versions.
+            for (record in database.getSavedRecords(artistTag)) {
+                control.checkActive()
+                if (record.localUri == null && record.status != DownloadStatus.DOWNLOADED) continue
+                val saved = existing.find(record, control::checkActive)
+                if (saved != null) database.markDownloaded(artistTag, record.postId, saved.uri.toString(), saved.bytes, saved.verifiedMd5)
+                else database.invalidateSavedFile(artistTag, record.postId)
+            }
             fun saveDiscovered(posts: List<Rule34Post>) {
                 control.checkActive()
                 database.insertDiscoveredPosts(artistTag, posts)
@@ -61,7 +79,7 @@ class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : Co
                     control.checkActive()
                     val record = DownloadRecord(artistTag, post.id, post.fileUrl, post.md5, DownloadStatus.PENDING, 0, 0)
                     existing.find(record, control::checkActive)?.let {
-                        database.markDownloaded(artistTag, post.id, it.uri.toString(), it.bytes)
+                        database.markDownloaded(artistTag, post.id, it.uri.toString(), it.bytes, it.verifiedMd5)
                     }
                 }
             }
@@ -104,7 +122,7 @@ class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : Co
                 control.checkActive()
                 val old = existing.find(record, control::checkActive)
                 if (old != null) {
-                    database.markDownloaded(artistTag, record.postId, old.uri.toString(), old.bytes)
+                    database.markDownloaded(artistTag, record.postId, old.uri.toString(), old.bytes, old.verifiedMd5)
                     completed++
                     continue
                 }
@@ -123,7 +141,7 @@ class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : Co
                             }
                         },
                     )
-                    database.markDownloaded(artistTag, record.postId, result.uri.toString(), result.bytesWritten)
+                    database.markDownloaded(artistTag, record.postId, result.uri.toString(), result.bytesWritten, result.verifiedMd5)
                     downloaded++
                 } catch (e: Exception) {
                     control.checkActive() // Pause/cancellation must never count as a failed file.

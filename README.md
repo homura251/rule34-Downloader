@@ -26,7 +26,7 @@
 - WorkManager 支持手动同步和可选的 15 分钟 / 1 小时 / 6 小时 / 24 小时后台检查。
 - Material Design 3 / Material You：Android 12+ 动态配色、状态切换动画、文件级进度、Snackbar 与完成通知。
 - API User ID / API Key 使用 Android Keystore AES-GCM 加密后仅保存在本机。
-- 匿名网页与原文件下载共享 WebView Cookie 和 User-Agent；Cloudflare 验证会先尝试通过内置 WebView 完成，需要手动操作时可从设置进入“网页验证”。不增加 Android 权限。
+- 匿名网页使用 WebView 的 Chromium 网络会话读取，验证页和下载共享真实 WebView User-Agent 与 Cookie。原文件的普通 HTTP 传输被挑战拦截时，可切换到同源 WebView 流式传输。不增加 Android 权限。
 
 ## 使用
 
@@ -43,7 +43,7 @@
 卸载会清除应用数据库和目录授权；公共 Downloads 中的文件会保留，但重装后的应用不能直接读取原安装留下的所有文件。
 
 1. 在设置中点“关联旧下载目录”，选择 `Download/Rule34 Downloader` 子文件夹，也可以选择单个画师文件夹。Android 11+ 不允许授权整个 Downloads 根目录，应进入子文件夹再确认。
-2. 重新添加原来的画师 tag 或同一个 Pool 图集，并同步。应用读取帖子元数据后，按对应目录、帖子 ID、文件类型以及可用的 MD5 校验关联旧文件，恢复“已下载”和本地预览，避免重复下载。图集目录使用稳定的 `pool_<ID>` 名称，标题变化不会改变保存路径。
+2. 重新添加原来的画师 tag 或同一个 Pool 图集，并同步。应用读取帖子元数据后，按对应目录、帖子 ID、文件类型和原文件 MD5 校验关联旧文件，恢复“已下载”和本地预览，避免重复下载。图集目录使用稳定的 `pool_<ID>` 名称，标题变化不会改变保存路径。
 3. 空文件、校验不匹配的文件不会视作完成。缺失文件仍正常下载；目录授权失效时请重新选择目录。
 
 这个流程恢复与重新添加的画师匹配的本地文件，不恢复被卸载清除的账号凭据或同步历史。关联操作只请求所选目录的读取授权，不增加照片或全盘存储权限。暂停为文件级继续，不使用 HTTP Range 续传当前半个文件。
@@ -58,6 +58,15 @@
 
 画师同步仍逐帖处理匹配标签的作品；GIF 多帧和视频保存为一个原文件。没有把不存在的“单帖多附件”字段加入模型，也不自动解压 ZIP。
 
+## 文件完整性与任务恢复
+
+- 新下载必须非空、匹配声明长度（若可用）并通过原文件 MD5；关闭输出后重新读取保存的文件校验，全部通过才公开 MediaStore 文件并标记已下载。
+- MD5 可以来自帖子元数据或原文件 URL 的精确 32 位哈希文件名。没有可靠哈希的文件会报告错误，不能凭非空内容认定完成或复用。
+- 升级到 1.5.0 后，旧完成记录会重新待校验，保留文件和 URI；下一次同步通过校验后恢复完成。已经验证的记录每次同步检查可读性与长度，失效 URI 会重新关联或下载。
+- 暂停中止网络请求和 WebView 流式传输，未完成的新文件被删除；继续会重新下载该文件。完成的旧文件保留。
+- 同一画师/图集的任务串行执行，包括取消后的清理。下次同步清理该目录中本应用所有的未公开 MediaStore 文件，处理进程被杀留下的临时文件。
+- 更换旧目录会刷新扫描索引并重启正在同步的任务。保留旧目录的只读授权，以免破坏仍引用旧 URI 的本地预览；已经暂停的任务保持暂停。
+
 ## 匿名模式与 API 模式
 
 Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时不会调用需要认证的 DAPI，而是解析公开网页：
@@ -66,12 +75,12 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 2. 逐条读取帖子详情页。
 3. 从详情页 Options / `.link-list` 的 “Original image” 获取原文件 URL。
 4. 从 `#tag-sidebar .tag-type-artist` 识别帖子中的 artist tag。
-5. 对匿名请求主动限速；普通 429 / 服务端错误使用退避重试。检测到 Cloudflare challenge 时，通过主线程 WebView 尝试完成验证，最多等待 30 秒，再携带共享 Cookie 重试原请求一次。
-6. 需要点击或无法自动完成的验证：打开设置 → “网页验证”，完成后重新同步。验证会话仅保存在本机，并供后续网页请求和原文件下载复用。验证页不加载帖子图片。
+5. 匿名元数据通过 WebView 读取渲染后的实际文档，并保留分页、详情读取的限速；后台页面最多等待 30 秒。原文件的 HTTP 挑战重试仍限制为一次，必要时切换到 WebView 流式传输，避免 Cookie 跨客户端后再次被拦截。
+6. 需要点击的验证：打开设置 → “网页验证”，确认实际请求页面可读取后自动返回，再重新同步。保留已有 Cookie，不要求 Cookie 更新，也不以 Cookie 变化宣告成功。允许 Cloudflare 子页面和验证资源；读取元数据时跳过帖子媒体资源。上次请求地址保存在本机，重启后仍可验证对应地址。
 
 首次同步作品很多的作者会明显慢于 API 模式。验证仍受站点策略和系统 WebView 版本影响；验证超时会明确提示，不会无限重试或把验证网页保存为原文件。
 
-实现参考 [Tachiyomi CloudflareInterceptor](https://github.com/izfaruqi/tachiyomi/blob/master/app/src/main/java/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt) 的 WebView / Cookie / 重试流程；同时使用 `cf-mitigated: challenge` 和旧验证页特征识别挑战，避免把普通限流当作验证。
+原文件的 HTTP 拦截流程参考 [Tachiyomi CloudflareInterceptor](https://github.com/izfaruqi/tachiyomi/blob/master/app/src/main/java/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt) 的 WebView / Cookie / 重试流程；同时使用 `cf-mitigated: challenge` 和旧验证页特征识别挑战，避免把普通限流当作验证。
 
 ## 存储与权限
 
@@ -102,9 +111,9 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 
 调试 APK：`app/build/outputs/apk/debug/app-debug.apk`。
 
-推送到 `main` 且提交信息包含 `[release-debug]` 时，CI 测试和构建通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.4.0`，附件为 `rule34-Downloader-v1.4.0-debug.apk`。其他版本的 Release 保留。
+推送到 `main` 且提交信息包含 `[release-debug]` 时，两组 CI 测试和构建全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.0`，附件为 `rule34-Downloader-v1.5.0-debug.apk`。其他版本的 Release 保留。
 
-普通 main 提交和 PR 会构建并上传调试 APK artifact，并使用临时测试密钥验证 Release 构建与签名；临时密钥签出的 Release APK 不会上传或发布。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
+普通 main 提交和 PR 会运行 JVM 单元测试及 Android 35 上的真实 WebView、流式传输、暂停、MediaStore 和数据库升级回归测试，构建并上传调试 APK artifact，并使用临时测试密钥验证 Release 构建与签名；临时密钥签出的 Release APK 不会上传或发布。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
 
 ## 固定密钥签名的 Release APK
 
