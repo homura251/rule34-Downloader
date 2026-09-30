@@ -69,7 +69,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --stacktrace --no-configuration-cache testReleaseUnitTest assembleRelease
+        run: ./gradlew --stacktrace --no-configuration-cache testDebugUnitTest assembleRelease
       - name: Verify APK signature
         run: |
           apksigner="$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)"

@@ -83,7 +83,7 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 
 ## 固定密钥签名的 Release APK
 
-`Signed Android Release` 工作流使用你保存在 GitHub Actions Secrets 中的固定密钥生成 Release APK。它会运行 Release 单元测试、启用代码和资源压缩，并通过 `apksigner verify` 检查签名后上传 APK。调试构建仍使用默认调试签名。
+`Signed Android Release` 工作流使用你保存在 GitHub Actions Secrets 中的固定密钥生成 Release APK。它会运行项目现有的单元测试、启用代码和资源压缩，并通过 `apksigner verify` 检查签名后上传 APK。调试构建仍使用默认调试签名。
 
 ### 1. 准备并备份密钥
 
@@ -135,7 +135,7 @@ Base64 是私钥文件的另一种表示方式，应与密钥文件一样保管�
 
 **从调试版切换**：如果设备上已安装的 APK 使用了其他密钥，Android 会拒绝直接覆盖安装。先做好数据备份，再卸载旧版并安装新签名版；卸载会移除应用内的画师、进度和设置等数据，已保存到公共 Downloads 的文件会保留。固定签名版后续使用相同密钥和更高 `versionCode` 时可以正常覆盖升级。
 
-本地签名构建也读取环境变量：`ANDROID_KEYSTORE_PATH`（密钥库路径，可为绝对路径或相对项目根目录）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`；四项齐全后运行 `./gradlew testReleaseUnitTest assembleRelease`。未设置时本地 Release 构建不签名，调试构建仍可正常运行。
+本地签名构建也读取环境变量：`ANDROID_KEYSTORE_PATH`（密钥库路径，可为绝对路径或相对项目根目录）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`；四项齐全后运行 `./gradlew testDebugUnitTest assembleRelease`。未设置时本地 Release 构建不签名，调试构建仍可正常运行。
 
 配置参考 [GitHub Actions Secrets](https://docs.github.com/zh/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets) 和 [Android 应用签名](https://developer.android.com/studio/publish/app-signing?hl=zh-CN)。
 
