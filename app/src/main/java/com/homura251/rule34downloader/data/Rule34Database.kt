@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import com.homura251.rule34downloader.network.PoolPost
+import com.homura251.rule34downloader.storage.FileChecksum
 
 class Rule34Database private constructor(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -52,6 +53,7 @@ class Rule34Database private constructor(context: Context) :
                 bytes_downloaded INTEGER NOT NULL DEFAULT 0,
                 total_bytes INTEGER NOT NULL DEFAULT 0,
                 local_uri TEXT,
+                verified_md5 TEXT,
                 error TEXT,
                 updated_at INTEGER NOT NULL,
                 PRIMARY KEY (artist_tag, post_id),
@@ -70,6 +72,11 @@ class Rule34Database private constructor(context: Context) :
             db.execSQL("ALTER TABLE artists ADD COLUMN pool_id INTEGER")
             db.execSQL("ALTER TABLE artists ADD COLUMN display_name TEXT")
             createPoolTable(db)
+        }
+        if (oldVersion < 5) {
+            db.execSQL("ALTER TABLE downloads ADD COLUMN verified_md5 TEXT")
+            // Keep original URIs/files, but recheck completions made by older versions.
+            db.execSQL("UPDATE downloads SET status = 'PENDING' WHERE status = 'DOWNLOADED'")
         }
     }
 
@@ -303,15 +310,18 @@ class Rule34Database private constructor(context: Context) :
         return inserted
     }
 
-    fun getDownloadQueue(tag: String): List<DownloadRecord> {
+    fun getDownloadQueue(tag: String): List<DownloadRecord> = getSavedRecords(tag, unfinishedOnly = true)
+
+    fun getSavedRecords(tag: String, unfinishedOnly: Boolean = false): List<DownloadRecord> {
         val pool = getArtist(tag)?.poolId != null
         val join = if (pool) " JOIN pool_posts p ON p.pool_tag = d.artist_tag AND p.post_id = d.post_id" else ""
         val order = if (pool) "p.position ASC" else "d.post_id ASC"
+        val filter = if (unfinishedOnly) " AND d.status IN ('PENDING', 'FAILED', 'DOWNLOADING')" else ""
         return readableDatabase.rawQuery(
         """
-        SELECT d.artist_tag, d.post_id, d.file_url, d.md5, d.status, d.bytes_downloaded, d.total_bytes
+        SELECT d.artist_tag, d.post_id, d.file_url, d.md5, d.status, d.bytes_downloaded, d.total_bytes, d.local_uri, d.verified_md5
         FROM downloads d$join
-        WHERE d.artist_tag = ? AND d.status IN ('PENDING', 'FAILED', 'DOWNLOADING')
+        WHERE d.artist_tag = ?$filter
         ORDER BY $order
         """.trimIndent(),
         arrayOf(tag),
@@ -327,6 +337,8 @@ class Rule34Database private constructor(context: Context) :
                         status = DownloadStatus.valueOf(cursor.getString(4)),
                         bytesDownloaded = cursor.getLong(5),
                         totalBytes = cursor.getLong(6),
+                        localUri = if (cursor.isNull(7)) null else cursor.getString(7),
+                        verifiedMd5 = if (cursor.isNull(8)) null else cursor.getString(8),
                     ),
                 )
             }
@@ -373,14 +385,14 @@ class Rule34Database private constructor(context: Context) :
     }
 
     @Synchronized
-    fun markDownloaded(tag: String, postId: Long, localUri: String, bytes: Long? = null) {
+    fun markDownloaded(tag: String, postId: Long, localUri: String, bytes: Long, verifiedMd5: String) {
+        require(bytes > 0 && FileChecksum.normalize(verifiedMd5) != null)
         val values = ContentValues().apply {
             put("status", DownloadStatus.DOWNLOADED.name)
             put("local_uri", localUri)
-            if (bytes != null) {
-                put("bytes_downloaded", bytes)
-                put("total_bytes", bytes)
-            }
+            put("bytes_downloaded", bytes)
+            put("total_bytes", bytes)
+            put("verified_md5", verifiedMd5.lowercase())
             putNull("error")
             put("updated_at", System.currentTimeMillis())
         }
@@ -390,6 +402,12 @@ class Rule34Database private constructor(context: Context) :
             "artist_tag = ? AND post_id = ?",
             arrayOf(tag, postId.toString()),
         )
+        signalChanged()
+    }
+
+    @Synchronized
+    fun invalidateSavedFile(tag: String, postId: Long) {
+        writableDatabase.execSQL("UPDATE downloads SET status = 'PENDING', local_uri = NULL, verified_md5 = NULL, bytes_downloaded = 0, total_bytes = 0 WHERE artist_tag = ? AND post_id = ?", arrayOf<Any>(tag, postId))
         signalChanged()
     }
 
@@ -469,7 +487,7 @@ class Rule34Database private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "rule34_downloader.db"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 5
 
         @Volatile
         private var instance: Rule34Database? = null

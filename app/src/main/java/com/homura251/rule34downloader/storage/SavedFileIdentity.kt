@@ -7,10 +7,9 @@ import java.security.MessageDigest
 data class SavedFileIdentity(val postId: Long, val md5: String?, val extension: String) {
     fun matches(postId: Long, md5: String, extension: String): Boolean =
         this.postId == postId && this.extension == extension.lowercase() &&
-            (this.md5 == null || !md5.matches(HASH) || this.md5.equals(md5, true))
+            FileChecksum.normalize(md5) != null && (this.md5 == null || this.md5.equals(md5, true))
 
     companion object {
-        private val HASH = Regex("[a-fA-F0-9]{32}")
         private val NAME = Regex("^(\\d+)(?:_([a-fA-F0-9]{32}))?(?: \\(\\d+\\))?\\.([a-zA-Z0-9]{2,5})$")
         fun parse(name: String): SavedFileIdentity? {
             val match = NAME.matchEntire(name) ?: return null
@@ -23,7 +22,8 @@ data class SavedFileIdentity(val postId: Long, val md5: String?, val extension: 
 
         /** Return byte count only for non-empty files whose known checksum matches. */
         fun verify(input: InputStream, expectedMd5: String, checkActive: () -> Unit = {}): Long? {
-            val digest = if (expectedMd5.matches(HASH)) MessageDigest.getInstance("MD5") else null
+            val expected = FileChecksum.normalize(expectedMd5) ?: return null
+            val digest = MessageDigest.getInstance("MD5")
             val buffer = ByteArray(64 * 1024)
             var bytes = 0L
             while (true) {
@@ -32,11 +32,12 @@ data class SavedFileIdentity(val postId: Long, val md5: String?, val extension: 
                 if (count < 0) break
                 if (count == 0) continue
                 bytes += count
-                digest?.update(buffer, 0, count)
+                digest.update(buffer, 0, count)
             }
             if (bytes == 0L) return null
-            val hash = digest?.digest()?.joinToString("") { "%02x".format(it.toInt() and 255) }
-            return bytes.takeIf { hash == null || hash.equals(expectedMd5, true) }
+            checkActive()
+            val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+            return bytes.takeIf { hash == expected }
         }
     }
 }

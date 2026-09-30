@@ -9,13 +9,17 @@ import com.homura251.rule34downloader.data.AppPreferences
 import com.homura251.rule34downloader.data.DownloadRecord
 import java.io.IOException
 
-class ExistingDownloads(private val context: Context, artistTag: String, checkActive: () -> Unit) {
-    data class Match(val uri: Uri, val bytes: Long)
+class ExistingDownloads(private val context: Context, private val artistTag: String, private val checkActive: () -> Unit) {
+    data class Match(val uri: Uri, val bytes: Long, val verifiedMd5: String)
     private data class File(val uri: Uri, val identity: SavedFileIdentity)
     private val resolver = context.contentResolver
-    private val files: Map<Long, List<File>>
+    private var files: Map<Long, List<File>> = emptyMap()
+    private var indexedTree: String? = null
 
-    init {
+    init { refresh() }
+
+    private fun refresh() {
+        val selectedTree = AppPreferences(context).existingDownloadsTreeUri
         val found = mutableListOf<File>()
         val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
         try { resolver.query(collection, arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME),
@@ -27,7 +31,7 @@ class ExistingDownloads(private val context: Context, artistTag: String, checkAc
                 found += File(ContentUris.withAppendedId(collection, cursor.getLong(0)), identity)
             }
         } } catch (_: SecurityException) { /* Reinstalled apps use the authorized document tree below. */ }
-        AppPreferences(context).existingDownloadsTreeUri?.let { value ->
+        selectedTree?.let { value ->
             try {
                 val tree = Uri.parse(value)
                 val rootId = DocumentsContract.getTreeDocumentId(tree)
@@ -62,6 +66,7 @@ class ExistingDownloads(private val context: Context, artistTag: String, checkAc
             }
         }
         files = found.groupBy { it.identity.postId }
+        indexedTree = selectedTree
     }
 
     private fun children(tree: Uri, id: String) = resolver.query(
@@ -71,13 +76,27 @@ class ExistingDownloads(private val context: Context, artistTag: String, checkAc
     ) ?: throw IOException("无法读取文件夹")
 
     fun find(record: DownloadRecord, checkActive: () -> Unit): Match? {
+        if (indexedTree != AppPreferences(context).existingDownloadsTreeUri) refresh()
+        val expected = FileChecksum.expected(record.md5, record.fileUrl) ?: return null
+        record.localUri?.let { value ->
+            val uri = Uri.parse(value)
+            val bytes = try {
+                checkActive()
+                val size = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                if (record.status == com.homura251.rule34downloader.data.DownloadStatus.DOWNLOADED &&
+                    record.verifiedMd5 == expected && record.bytesDownloaded > 0 && size == record.bytesDownloaded) {
+                    resolver.openInputStream(uri)?.use { if (it.read() >= 0) size else null }
+                } else resolver.openInputStream(uri)?.use { SavedFileIdentity.verify(it, expected, checkActive) }
+            } catch (_: SecurityException) { null } catch (_: IOException) { null }
+            if (bytes != null) return Match(uri, bytes, expected)
+        }
         for (file in files[record.postId].orEmpty()) {
             checkActive()
-            if (!file.identity.matches(record.postId, record.md5, SavedFileIdentity.extension(record.fileUrl))) continue
+            if (!file.identity.matches(record.postId, expected, SavedFileIdentity.extension(record.fileUrl))) continue
             val bytes = try {
-                resolver.openInputStream(file.uri)?.use { SavedFileIdentity.verify(it, record.md5, checkActive) }
+                resolver.openInputStream(file.uri)?.use { SavedFileIdentity.verify(it, expected, checkActive) }
             } catch (_: SecurityException) { null } catch (_: IOException) { null }
-            if (bytes != null) return Match(file.uri, bytes)
+            if (bytes != null) return Match(file.uri, bytes, expected)
         }
         return null
     }

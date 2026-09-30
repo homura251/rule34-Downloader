@@ -8,6 +8,7 @@ import okio.buffer
 import java.io.Closeable
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.sync.Mutex
 
 class SyncPausedException : CancellationException("同步已暂停")
 
@@ -78,6 +79,11 @@ class SyncControl(private val checkJob: () -> Unit = {}) {
 
 internal object SyncControls {
     private val active = ConcurrentHashMap<String, SyncControl>()
+    private val gates = ConcurrentHashMap<String, Mutex>()
+    // WorkManager replacement cancels asynchronously. Old cleanup must finish
+    // before a new worker can alter this artist's rows or pending MediaStore files.
+    fun gate(tag: String): Mutex = gates.getOrPut(tag) { Mutex() }
+    fun activeTags(): List<String> = active.keys.toList()
     fun register(tag: String, control: SyncControl) { active.put(tag, control)?.pause() }
     fun unregister(tag: String, control: SyncControl) { active.remove(tag, control) }
     fun pause(tag: String): Boolean = active[tag]?.let { it.pause(); true } ?: false

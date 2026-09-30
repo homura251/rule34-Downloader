@@ -13,7 +13,6 @@ import com.homura251.rule34downloader.data.Rule34Tag
 import com.homura251.rule34downloader.data.GalleryPost
 import com.homura251.rule34downloader.network.PostUrlParser
 import com.homura251.rule34downloader.network.Rule34Client
-import com.homura251.rule34downloader.network.Rule34HtmlClient
 import com.homura251.rule34downloader.network.Rule34Network
 import com.homura251.rule34downloader.network.Rule34PoolClient
 import com.homura251.rule34downloader.work.SyncScheduler
@@ -140,7 +139,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _addAuthorState.value = current.copy(resolving = true, error = null, candidates = emptyList(), selectedArtist = null)
             viewModelScope.launch(Dispatchers.IO) {
                 runCatching {
-                    Rule34PoolClient(Rule34HtmlClient(Rule34Network.get(getApplication()).client)).getPage(poolId)
+                    Rule34PoolClient(Rule34Network.get(getApplication()).htmlClient()).getPage(poolId)
                 }.onSuccess { page ->
                     if (!_addAuthorState.value.open || _addAuthorState.value.input != current.input) return@onSuccess
                     _addAuthorState.value = _addAuthorState.value.copy(
@@ -192,7 +191,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val post = client.getPost(postId)
                     post.id to client.resolveArtistTags(post.tags)
                 } else {
-                    val resolved = Rule34HtmlClient(Rule34Network.get(getApplication()).client)
+                    val resolved = Rule34Network.get(getApplication()).htmlClient()
                         .getPostWithArtists(postId)
                     resolved.post.id to resolved.artists
                 }
@@ -251,13 +250,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val resolver = getApplication<Application>().contentResolver
                 resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val old = preferences.existingDownloadsTreeUri
                 preferences.existingDownloadsTreeUri = uri.toString()
-                if (old != null && old != uri.toString()) runCatching {
-                    resolver.releasePersistableUriPermission(Uri.parse(old), Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
+                // Gallery URIs can still reference the previous tree. Retain its
+                // read grant so changing the scan folder cannot break old previews.
+                SyncScheduler.restartAfterFolderChange(getApplication())
                 _settings.value = _settings.value.copy(existingDownloadsLinked = true)
-                eventsChannel.send(UiEvent.Message("旧下载目录已关联。重新添加同一画师或图集并同步，会校验并复用已有文件。"))
+                eventsChannel.send(UiEvent.Message("旧下载目录已关联，正在同步的任务会重新扫描；暂停任务继续后会校验并复用旧文件。"))
             } catch (_: Exception) {
                 eventsChannel.send(UiEvent.Message("目录授权失败，请重新选择 Rule34 Downloader 文件夹。"))
             }

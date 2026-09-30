@@ -1,1 +1,4 @@
-# No reflection-based serializers are used. Keep rules intentionally minimal.
+# WebView invokes these streaming bridge methods by their JavaScript names.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}

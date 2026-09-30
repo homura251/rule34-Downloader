@@ -21,6 +21,10 @@ class AppPreferences(context: Context) {
         get() = prefs.getString("existing_downloads_tree_uri", null)
         set(value) = prefs.edit().putString("existing_downloads_tree_uri", value).apply()
 
+    var verificationUrl: String?
+        get() = prefs.getString("verification_url", null)
+        set(value) = prefs.edit().putString("verification_url", value).apply()
+
     companion object {
         const val DEFAULT_INTERVAL_MINUTES = 360L
 

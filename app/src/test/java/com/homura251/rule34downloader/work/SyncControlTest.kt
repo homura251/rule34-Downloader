@@ -9,8 +9,32 @@ import org.junit.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.withLock
 
 class SyncControlTest {
+    @Test fun replacementWaitsForOldWorkerCleanup() = runBlocking {
+        val cleaning = CompletableDeferred<Unit>()
+        val finishCleanup = CompletableDeferred<Unit>()
+        val replacementStarted = CompletableDeferred<Unit>()
+        val old = async {
+            SyncControls.gate("gate-test").withLock {
+                cleaning.complete(Unit)
+                finishCleanup.await()
+            }
+        }
+        cleaning.await()
+        val next = async {
+            SyncControls.gate("gate-test").withLock { replacementStarted.complete(Unit) }
+        }
+        kotlinx.coroutines.yield()
+        assertFalse(replacementStarted.isCompleted)
+        finishCleanup.complete(Unit)
+        old.await(); next.await()
+        assertTrue(replacementStarted.isCompleted)
+    }
     @Test fun pauseCancelsActiveRequestsOnlyOnce() {
         val control = SyncControl()
         var active = 0

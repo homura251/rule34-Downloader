@@ -12,7 +12,11 @@ import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 
-class Rule34HtmlClient(private val httpClient: OkHttpClient, private val checkActive: () -> Unit = {}) {
+class Rule34HtmlClient(
+    private val httpClient: OkHttpClient,
+    private val checkActive: () -> Unit = {},
+    private val browserFetch: ((String, () -> Unit) -> Document)? = null,
+) {
     data class ResolvedPost(
         val post: Rule34Post,
         val artists: List<Rule34Tag>,
@@ -41,6 +45,11 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient, private val checkAc
             "$SITE/index.php?page=post&s=list&tags=${encode(query)}&pid=$offset",
         )
         val postIds = parsePostIds(document)
+        if (postIds.isEmpty() && document.selectFirst(".image-list") == null &&
+            !document.body().text().contains("Nobody here but us chickens", true) &&
+            !document.body().text().contains("No posts found", true)) {
+            throw RetryableApiException("匿名列表页面没有识别到作品列表，请检查站点页面或稍后重试。")
+        }
         val previews = parseThumbnailUrls(document)
         return postIds.mapIndexed { index, postId ->
             checkActive()
@@ -52,6 +61,12 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient, private val checkAc
     }
 
     internal fun fetchDocument(url: String): Document {
+        browserFetch?.let { fetch ->
+            checkActive()
+            try { return fetch(url, checkActive) } catch (e: CloudflareChallengeException) {
+                throw HtmlChallengeException(e.message.orEmpty(), e)
+            }
+        }
         var lastStatus = 0
         repeat(MAX_REQUEST_ATTEMPTS) { attempt ->
             checkActive()
