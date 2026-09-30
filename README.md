@@ -79,7 +79,65 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 
 推送到 `main` 且提交信息包含 `[release-debug]` 时，CI 测试和构建通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.2.0`，附件为 `rule34-Downloader-v1.2.0-debug.apk`。其他版本的 Release 保留。
 
-普通 main 提交和 PR 会构建并上传 Actions APK artifact，但不会发布 Release。合并 PR 时若要发布，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
+普通 main 提交和 PR 会构建并上传调试 APK artifact，并使用临时测试密钥验证 Release 构建与签名；临时密钥签出的 Release APK 不会上传或发布。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
+
+## 固定密钥签名的 Release APK
+
+`Signed Android Release` 工作流使用你保存在 GitHub Actions Secrets 中的固定密钥生成 Release APK。它会运行 Release 单元测试、启用代码和资源压缩，并通过 `apksigner verify` 检查签名后上传 APK。调试构建仍使用默认调试签名。
+
+### 1. 准备并备份密钥
+
+已有这个应用的发布密钥时，继续使用原密钥。没有密钥时，可以在自己电脑的终端运行以下命令（需要 JDK，Android Studio 也自带 JDK）：
+
+```bash
+keytool -genkeypair -v -storetype JKS -keystore rule34-release.jks -alias rule34 -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=Rule34 Downloader"
+```
+
+按提示设置密钥库密码和密钥密码；密钥密码可以直接按回车，使用相同密码。这里的别名是 `rule34`。妥善备份 `rule34-release.jks`、两个密码和别名，后续更新继续使用同一密钥；仅有 APK 或公钥证书不能恢复私钥。
+
+把密钥库编码为 Base64。在 Windows PowerShell 中运行：
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path .\rule34-release.jks))) | Set-Clipboard
+```
+
+Linux / macOS 可以生成一个文件，再复制其中的内容：
+
+```bash
+base64 < rule34-release.jks > rule34-release.b64
+```
+
+Base64 是私钥文件的另一种表示方式，应与密钥文件一样保管；项目已忽略常见密钥库、Base64 文件和 `keystore.properties`。
+
+### 2. 添加四个 Repository Secrets
+
+进入仓库的 [Settings → Secrets and variables → Actions](https://github.com/homura251/rule34-Downloader/settings/secrets/actions)，点击 **New repository secret**，逐个添加：
+
+| Secret 名称 | 值 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | 完整密钥库文件的 Base64 内容，不能填文件路径 |
+| `ANDROID_KEYSTORE_PASSWORD` | 密钥库密码 |
+| `ANDROID_KEY_ALIAS` | 密钥别名；上述命令生成的是 `rule34` |
+| `ANDROID_KEY_PASSWORD` | 密钥密码；若生成时直接按回车，则与密钥库密码相同 |
+
+填写 **Secrets**，而不是 Variables。工作流只在 `main` 上运行，不向 PR 提供发布密钥；密钥库恢复到 runner 临时目录，结束时清理。缺少任何一项时会提示缺少的 Secret 名称并停止构建。
+
+### 3. 生成或发布签名 APK
+
+第一次设置后，进入 **Actions → Signed Android Release → Run workflow**，选择 `main`：
+
+- `publish_release` 勾选：上传 Actions artifact，并发布 `v<versionName>` GitHub Release，例如 `v1.2.0` / `rule34-Downloader-v1.2.0-release.apk`。
+- `publish_release` 取消勾选：只上传签名 APK artifact，可先检查安装效果。
+
+以后推送到 `main` 且最终提交信息包含 `[release]`，也会自动构建并发布签名 Release。`[release-debug]` 继续发布调试 prerelease；普通提交不发布 Release。
+
+签名 Release 不覆盖已有版本，发布新版本前应同时增加 `app/build.gradle.kts` 中的 `versionCode` 和 `versionName`。只想重新打包当前版本时，取消 `publish_release` 即可。
+
+**从调试版切换**：如果设备上已安装的 APK 使用了其他密钥，Android 会拒绝直接覆盖安装。先做好数据备份，再卸载旧版并安装新签名版；卸载会移除应用内的画师、进度和设置等数据，已保存到公共 Downloads 的文件会保留。固定签名版后续使用相同密钥和更高 `versionCode` 时可以正常覆盖升级。
+
+本地签名构建也读取环境变量：`ANDROID_KEYSTORE_PATH`（密钥库路径，可为绝对路径或相对项目根目录）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`；四项齐全后运行 `./gradlew testReleaseUnitTest assembleRelease`。未设置时本地 Release 构建不签名，调试构建仍可正常运行。
+
+配置参考 [GitHub Actions Secrets](https://docs.github.com/zh/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets) 和 [Android 应用签名](https://developer.android.com/studio/publish/app-signing?hl=zh-CN)。
 
 ## 结构
 

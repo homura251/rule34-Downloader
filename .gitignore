@@ -10,3 +10,9 @@
 app/build/
 *.apk
 *.aab
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.b64
+keystore.properties
