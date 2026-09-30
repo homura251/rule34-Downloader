@@ -16,6 +16,7 @@ import com.homura251.rule34downloader.network.BrowserMediaReader
 import com.homura251.rule34downloader.network.BrowserPageReader
 import com.homura251.rule34downloader.network.CloudflareChallengeException
 import com.homura251.rule34downloader.network.Rule34Network
+import com.homura251.rule34downloader.network.RetryableApiException
 import com.homura251.rule34downloader.storage.ExistingDownloads
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
 import com.homura251.rule34downloader.storage.VerifiedTransfer
@@ -81,6 +82,22 @@ class DownloadReliabilityTest {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody("<div class='image-list'></div>"))
             assertNotNull(pages().read(server.url("/list").toString()).selectFirst(".image-list"))
+        }
+    }
+
+    @Test fun ordinaryRateLimitsDoNotAskForCloudflareVerification() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(429).setHeader("Content-Type", "text/html").setBody("<p>Too many requests</p>"))
+            assertThrows(RetryableApiException::class.java) { pages().read(server.url("/limit").toString()) }
+        }
+    }
+
+    @Test fun readsDownloadableMediaResponsesWithoutStartingAnotherDownload() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setHeader("Content-Type", "application/octet-stream")
+                .setHeader("Content-Disposition", "attachment; filename=original.bin").setBody("hello"))
+            val url = server.url("/original.bin").toString()
+            assertEquals(url, pages().read(url).baseUri())
         }
     }
 

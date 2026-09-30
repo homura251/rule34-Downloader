@@ -22,6 +22,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** Success means the requested document is readable, not that a cookie has changed. */
 object BrowserPagePolicy {
+    fun isDownloadable(type: String): Boolean = type.startsWith("image/") || type.startsWith("video/") ||
+        type.substringBefore(';').equals("application/octet-stream", true)
     fun matchesRequest(requested: String, actual: String): Boolean {
         val expected = requested.toHttpUrlOrNull() ?: return false
         val result = actual.toHttpUrlOrNull() ?: return false
@@ -86,6 +88,7 @@ class BrowserPageReader(
             try {
                 val view = createWebView(context)
                 webView = view
+                var httpError = 0
                 fun inspect() {
                     if (done.get()) return
                     BrowserPagePolicy.snapshot(view) { document, type ->
@@ -93,10 +96,14 @@ class BrowserPageReader(
                             BrowserPagePolicy.isReadable(document, type) && done.compareAndSet(false, true)) {
                             result.set(document)
                             latch.countDown()
+                        } else if (!BrowserPagePolicy.isChallenge(document) && document.body().text().isNotBlank()) {
+                            if (httpError == 429 || httpError >= 500) fail(RetryableApiException("匿名网页暂时不可用（HTTP $httpError），请稍后重试。"))
+                            else if (httpError >= 400) fail(ApiException("匿名网页请求失败（HTTP $httpError）。"))
                         }
                     }
                 }
                 view.webViewClient = object : WebViewClient() {
+                    override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { httpError = 0 }
                     override fun onPageFinished(view: WebView, url: String) = inspect()
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                         BrowserPagePolicy.blockNavigation(request.url.toString(), request.isForMainFrame, allowed)
@@ -106,9 +113,18 @@ class BrowserPageReader(
                         if (request.isForMainFrame) fail(IOException("网页连接失败（${error.errorCode}）：${error.description}"))
                     }
                     override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-                        if (request.isForMainFrame && errorResponse.statusCode !in listOf(403, 429, 503)) {
-                            fail(ApiException("匿名网页请求失败（HTTP ${errorResponse.statusCode}）。"))
+                        if (request.isForMainFrame) {
+                            httpError = errorResponse.statusCode
+                            if (httpError !in listOf(403, 429, 503)) fail(ApiException("匿名网页请求失败（HTTP $httpError）。"))
                         }
+                    }
+                }
+                // Attachment responses are readable media, even when WebView does
+                // not render them. Do not start another download in the solver.
+                view.setDownloadListener { downloadUrl, _, _, type, _ ->
+                    if (allowed(downloadUrl) && BrowserPagePolicy.matchesRequest(url, downloadUrl) &&
+                        BrowserPagePolicy.isDownloadable(type) && done.compareAndSet(false, true)) {
+                        result.set(Jsoup.parse("", downloadUrl)); latch.countDown()
                     }
                 }
                 val poll = object : Runnable {

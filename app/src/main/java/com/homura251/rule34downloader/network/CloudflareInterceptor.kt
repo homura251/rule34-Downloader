@@ -44,7 +44,12 @@ class CloudflareInterceptor(
         fun checkActive() {
             if (chain.call().isCanceled()) throw InterruptedIOException("网页验证已取消")
         }
-        while (!challengeLock.tryLock(100, TimeUnit.MILLISECONDS)) checkActive()
+        try {
+            while (!challengeLock.tryLock(100, TimeUnit.MILLISECONDS)) checkActive()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw InterruptedIOException("网页验证已取消").apply { initCause(e) }
+        }
         try {
             checkActive()
             // Another request may already have refreshed the shared clearance.

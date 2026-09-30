@@ -107,7 +107,12 @@ class MediaStoreDownloader(
             arrayOf(buildRelativePath(artistTag), context.packageName), null)?.use { cursor ->
             while (cursor.moveToNext()) {
                 checkDownloadActive()
-                context.contentResolver.delete(android.content.ContentUris.withAppendedId(collection, cursor.getLong(0)), null, null)
+                try {
+                    context.contentResolver.delete(android.content.ContentUris.withAppendedId(collection, cursor.getLong(0)), null, null)
+                } catch (_: SecurityException) {
+                    // A previous installation can share the package name but no
+                    // longer own this row. Its files require the user's read grant.
+                }
             }
         }
     }

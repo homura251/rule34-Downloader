@@ -74,6 +74,15 @@ class WebVerificationActivity : Activity() {
                     if (request.isForMainFrame) status.text = "页面返回 HTTP ${errorResponse.statusCode}，尚未确认可读取。请完成验证或重新加载。"
                 }
             }
+            view.setDownloadListener { url, _, _, type, _ ->
+                if (!isFinishing && !verified && isRule34UrlString(url) &&
+                    BrowserPagePolicy.matchesRequest(network.verificationUrl, url) && BrowserPagePolicy.isDownloadable(type)) {
+                    verified = true
+                    network.cookies.flush()
+                    Toast.makeText(this, "原文件地址已可访问，请重新同步。", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+            }
             layout.addView(view, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
             setContentView(layout)
             // Keep a valid clearance; resetting it on every visit caused verification loops.

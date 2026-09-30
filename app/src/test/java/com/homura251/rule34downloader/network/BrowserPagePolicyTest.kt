@@ -6,6 +6,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BrowserPagePolicyTest {
+    @Test fun attachmentVerificationDoesNotAcceptHtml() {
+        assertTrue(BrowserPagePolicy.isDownloadable("video/webm"))
+        assertTrue(BrowserPagePolicy.isDownloadable("application/octet-stream"))
+        assertFalse(BrowserPagePolicy.isDownloadable("text/html"))
+    }
     @Test fun redirectsToAnAccountPageCannotCompletePostVerification() {
         val expected = "https://rule34.xxx/index.php?page=post&s=list&tags=test"
         assertFalse(BrowserPagePolicy.matchesRequest(expected, "https://rule34.xxx/index.php?page=account&s=login"))
