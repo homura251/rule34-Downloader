@@ -44,6 +44,8 @@ data class ArtistRecord(
     val sourcePostId: Long,
     val lastSeenPostId: Long,
     val paused: Boolean = false,
+    val poolId: Long? = null,
+    val displayName: String? = null,
 )
 
 data class ArtistSummary(
@@ -60,7 +62,10 @@ data class ArtistSummary(
     val failedCount: Int,
     val currentBytes: Long,
     val currentTotalBytes: Long,
+    val poolId: Long? = null,
+    val displayName: String? = null,
 ) {
+    val title: String get() = displayName ?: tag
     val currentFileProgress: Float?
         get() = if (currentTotalBytes > 0L) {
             (currentBytes.toDouble() / currentTotalBytes.toDouble())
@@ -107,4 +112,6 @@ data class GalleryPost(
 data class GalleryPage(
     val posts: List<GalleryPost>,
     val totalCount: Int,
+    val title: String? = null,
+    val poolId: Long? = null,
 )

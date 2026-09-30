@@ -16,6 +16,8 @@ import com.homura251.rule34downloader.network.RetryableApiException
 import com.homura251.rule34downloader.network.Rule34Client
 import com.homura251.rule34downloader.network.Rule34HtmlClient
 import com.homura251.rule34downloader.network.Rule34Network
+import com.homura251.rule34downloader.network.Rule34PoolClient
+import com.homura251.rule34downloader.data.Rule34Post
 import com.homura251.rule34downloader.storage.ExistingDownloads
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
 import kotlinx.coroutines.CancellationException
@@ -46,16 +48,12 @@ class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : Co
                 .addInterceptor(control.interceptor).build()
             val credentials = CredentialsStore(applicationContext).get()
             val api = credentials?.let { Rule34Client(it, control::checkActive) { connection -> control.register(connection::disconnect) } }
-            val html = if (api == null) Rule34HtmlClient(http, control::checkActive) else null
+            val html = Rule34HtmlClient(http, control::checkActive)
             val pageSize = if (api != null) Rule34Client.MAX_POSTS_PER_PAGE else Rule34HtmlClient.POSTS_PER_PAGE
             val existing = ExistingDownloads(applicationContext, artistTag, control::checkActive)
             val downloader = MediaStoreDownloader(applicationContext, http)
-            var page = 0
-            var maxSeen = artist.lastSeenPostId
-            while (true) {
+            fun saveDiscovered(posts: List<Rule34Post>) {
                 control.checkActive()
-                val posts = api?.searchPosts(artistTag, artist.lastSeenPostId, page, pageSize)
-                    ?: html!!.searchPosts(artistTag, artist.lastSeenPostId, page)
                 database.insertDiscoveredPosts(artistTag, posts)
                 // Associate old files as each page is discovered so the gallery can
                 // immediately use local originals, even during a large initial scan.
@@ -66,14 +64,37 @@ class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : Co
                         database.markDownloaded(artistTag, post.id, it.uri.toString(), it.bytes)
                     }
                 }
-                posts.maxOfOrNull { it.id }?.let { maxSeen = maxOf(maxSeen, it) }
-                page++
-                if (posts.size < pageSize) break
-                delay(if (api != null) API_PAGE_DELAY_MS else HTML_PAGE_DELAY_MS)
             }
-            control.checkActive()
-            // Commit the discovery watermark only after every page has been saved.
-            if (maxSeen > artist.lastSeenPostId) database.updateLastSeenPostId(artistTag, maxSeen)
+            if (artist.poolId != null) {
+                // Pools can add old posts or change their reading order. Refresh all
+                // membership pages, then fetch metadata only for unknown post IDs.
+                val pool = Rule34PoolClient(html, control::checkActive).getPool(artist.poolId)
+                control.checkActive()
+                database.replacePoolMembership(artistTag, pool.title, pool.posts)
+                val known = database.getKnownPostIds(artistTag)
+                for ((index, member) in pool.posts.filterNot { it.id in known }.withIndex()) {
+                    control.checkActive()
+                    if (index > 0) delay(if (api != null) API_PAGE_DELAY_MS else HTML_PAGE_DELAY_MS)
+                    val post = api?.getPost(member.id) ?: html.getPostWithArtists(member.id).post
+                    saveDiscovered(listOf(post.copy(previewUrl = member.previewUrl ?: post.previewUrl)))
+                }
+            } else {
+                var page = 0
+                var maxSeen = artist.lastSeenPostId
+                while (true) {
+                    control.checkActive()
+                    val posts = api?.searchPosts(artistTag, artist.lastSeenPostId, page, pageSize)
+                        ?: html.searchPosts(artistTag, artist.lastSeenPostId, page)
+                    saveDiscovered(posts)
+                    posts.maxOfOrNull { it.id }?.let { maxSeen = maxOf(maxSeen, it) }
+                    page++
+                    if (posts.size < pageSize) break
+                    delay(if (api != null) API_PAGE_DELAY_MS else HTML_PAGE_DELAY_MS)
+                }
+                control.checkActive()
+                // Commit the discovery watermark only after every page has been saved.
+                if (maxSeen > artist.lastSeenPostId) database.updateLastSeenPostId(artistTag, maxSeen)
+            }
             val queue = database.getDownloadQueue(artistTag)
             var completed = 0
             var downloaded = 0

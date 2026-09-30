@@ -58,18 +58,18 @@ fun AddAuthorDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加作者") },
+        title = { Text("添加作者或图集") },
         text = {
             Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "可以直接输入单个 artist tag，也可以粘贴帖子链接、帖子 ID 或单作者搜索链接。",
+                    "输入单个 artist tag，或粘贴帖子/作者搜索链接。整组下载漫画和套图时，粘贴 Pool 图集链接或输入 pool:图集ID。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
                     value = state.input,
                     onValueChange = onInputChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("artist tag / Rule34 链接 / Post ID") },
+                    label = { Text("artist tag / 帖子或图集链接 / Post ID") },
                     placeholder = { Text("savvyraexo") },
                     enabled = !state.resolving,
                     singleLine = true,
@@ -78,7 +78,7 @@ fun AddAuthorDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
-                        Text("正在读取帖子中的 artist tag…")
+                        Text("正在读取来源信息…")
                     }
                 }
                 AnimatedVisibility(!state.error.isNullOrBlank()) {
@@ -87,6 +87,10 @@ fun AddAuthorDialog(
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
+                }
+                if (state.poolId != null) {
+                    Text(state.poolTitle.orEmpty(), fontWeight = FontWeight.SemiBold)
+                    Text("图集 #${state.poolId} · 整组下载，按原站图集顺序预览。", style = MaterialTheme.typography.bodySmall)
                 }
                 if (state.candidates.isNotEmpty()) {
                     Column(
@@ -133,11 +137,11 @@ fun AddAuthorDialog(
         },
         confirmButton = {
             Button(
-                onClick = if (state.candidates.isEmpty()) onResolve else onConfirm,
+                onClick = if (state.candidates.isEmpty() && state.poolId == null) onResolve else onConfirm,
                 enabled = !state.resolving &&
-                    if (state.candidates.isEmpty()) state.input.isNotBlank() else state.selectedArtist != null,
+                    if (state.candidates.isEmpty() && state.poolId == null) state.input.isNotBlank() else state.selectedArtist != null,
             ) {
-                Text(if (state.candidates.isEmpty()) "继续" else "添加并下载")
+                Text(if (state.candidates.isEmpty() && state.poolId == null) "继续" else "添加并下载")
             }
         },
         dismissButton = {

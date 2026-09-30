@@ -41,9 +41,9 @@ fun DownloaderApp(
         artists.forEach { artist ->
             val previous = previousStates[artist.tag]
             if (previous == SyncState.SYNCING && artist.syncState == SyncState.COMPLETE) {
-                snackbarHostState.showSnackbar("${artist.tag} 同步完成")
+                snackbarHostState.showSnackbar("${artist.title} 同步完成")
             } else if (previous == SyncState.SYNCING && artist.syncState == SyncState.ERROR) {
-                snackbarHostState.showSnackbar("${artist.tag} 同步结束，有项目需要重试")
+                snackbarHostState.showSnackbar("${artist.title} 同步结束，有项目需要重试")
             }
             previousStates[artist.tag] = artist.syncState
         }
