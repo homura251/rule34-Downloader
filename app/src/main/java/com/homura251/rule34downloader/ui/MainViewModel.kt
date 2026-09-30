@@ -15,6 +15,7 @@ import com.homura251.rule34downloader.network.PostUrlParser
 import com.homura251.rule34downloader.network.Rule34Client
 import com.homura251.rule34downloader.network.Rule34HtmlClient
 import com.homura251.rule34downloader.network.Rule34Network
+import com.homura251.rule34downloader.network.Rule34PoolClient
 import com.homura251.rule34downloader.work.SyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -36,6 +37,8 @@ data class AddAuthorState(
     val candidates: List<Rule34Tag> = emptyList(),
     val selectedArtist: String? = null,
     val error: String? = null,
+    val poolId: Long? = null,
+    val poolTitle: String? = null,
 )
 
 data class SettingsState(
@@ -57,6 +60,8 @@ data class GalleryState(
     val totalCount: Int = 0,
     val loading: Boolean = false,
     val error: String? = null,
+    val title: String? = null,
+    val poolId: Long? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -113,6 +118,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             candidates = emptyList(),
             selectedArtist = null,
             error = null,
+            poolId = null,
+            poolTitle = null,
         )
     }
 
@@ -124,16 +131,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val current = _addAuthorState.value
         val input = current.input.trim()
         if (input.isEmpty()) {
-            _addAuthorState.value = current.copy(error = "请输入 artist tag、帖子链接或帖子 ID。")
+            _addAuthorState.value = current.copy(error = "请输入 artist tag、帖子链接/ID 或图集链接。")
             return
         }
 
+        val poolId = PostUrlParser.parsePoolId(input)
+        if (poolId != null) {
+            _addAuthorState.value = current.copy(resolving = true, error = null, candidates = emptyList(), selectedArtist = null)
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching {
+                    Rule34PoolClient(Rule34HtmlClient(Rule34Network.get(getApplication()).client)).getPage(poolId)
+                }.onSuccess { page ->
+                    if (!_addAuthorState.value.open || _addAuthorState.value.input != current.input) return@onSuccess
+                    _addAuthorState.value = _addAuthorState.value.copy(
+                        resolving = false, poolId = poolId, poolTitle = page.title,
+                        sourcePostId = 0L, selectedArtist = Rule34PoolClient.key(poolId), error = null,
+                    )
+                }.onFailure { error ->
+                    if (!_addAuthorState.value.open || _addAuthorState.value.input != current.input) return@onFailure
+                    _addAuthorState.value = _addAuthorState.value.copy(resolving = false, error = error.message ?: "读取图集失败。")
+                }
+            }
+            return
+        }
         val postId = PostUrlParser.parsePostId(input)
         if (postId == null) {
             val tag = PostUrlParser.parseArtistTag(input)
             if (tag == null) {
                 _addAuthorState.value = current.copy(
-                    error = "无法识别输入。请输入单个 artist tag，或粘贴 Rule34 帖子/作者搜索链接。",
+                    error = "无法识别输入。请输入单个 artist tag，或粘贴 Rule34 帖子、作者搜索、Pool 图集链接。",
                 )
                 return
             }
@@ -195,14 +221,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val current = _addAuthorState.value
         val tag = current.selectedArtist ?: return
         val postId = current.sourcePostId ?: 0L
-        val added = database.addArtist(tag, postId)
+        val added = database.addArtist(tag, postId, current.poolId, current.poolTitle)
         closeAddAuthor()
         if (added) {
             SyncScheduler.enqueueArtistSync(getApplication(), tag)
             val mode = if (credentialsStore.isConfigured()) "API" else "匿名网页"
-            eventsChannel.trySend(UiEvent.Message("已添加 $tag，使用${mode}模式开始同步。"))
+            eventsChannel.trySend(UiEvent.Message(if (current.poolId != null) {
+                "已添加图集 ${current.poolTitle}，开始整组同步。"
+            } else "已添加 $tag，使用${mode}模式开始同步。"))
         } else {
-            eventsChannel.trySend(UiEvent.Message("$tag 已在作者列表中。"))
+            eventsChannel.trySend(UiEvent.Message("${current.poolTitle ?: tag} 已在列表中。"))
         }
     }
 
@@ -229,7 +257,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     resolver.releasePersistableUriPermission(Uri.parse(old), Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 _settings.value = _settings.value.copy(existingDownloadsLinked = true)
-                eventsChannel.send(UiEvent.Message("旧下载目录已关联。重新添加同一画师并同步，会校验并复用已有文件。"))
+                eventsChannel.send(UiEvent.Message("旧下载目录已关联。重新添加同一画师或图集并同步，会校验并复用已有文件。"))
             } catch (_: Exception) {
                 eventsChannel.send(UiEvent.Message("目录授权失败，请重新选择 Rule34 Downloader 文件夹。"))
             }
@@ -267,7 +295,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         galleryJob = viewModelScope.launch {
             try {
                 database.observeGallery(tag, limit).collect { page ->
-                    _gallery.value = GalleryState(tag, page.posts, page.totalCount)
+                    _gallery.value = GalleryState(tag, page.posts, page.totalCount, title = page.title, poolId = page.poolId)
                 }
             } catch (e: CancellationException) {
                 throw e

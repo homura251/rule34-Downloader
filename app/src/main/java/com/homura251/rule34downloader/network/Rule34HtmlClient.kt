@@ -51,7 +51,7 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient, private val checkAc
         }
     }
 
-    private fun fetchDocument(url: String): Document {
+    internal fun fetchDocument(url: String): Document {
         var lastStatus = 0
         repeat(MAX_REQUEST_ATTEMPTS) { attempt ->
             checkActive()

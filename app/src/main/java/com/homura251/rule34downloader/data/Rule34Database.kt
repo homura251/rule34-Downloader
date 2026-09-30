@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
+import com.homura251.rule34downloader.network.PoolPost
 
 class Rule34Database private constructor(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -30,6 +31,8 @@ class Rule34Database private constructor(context: Context) :
                 last_seen_post_id INTEGER NOT NULL DEFAULT 0,
                 sync_state TEXT NOT NULL DEFAULT 'IDLE',
                 sync_paused INTEGER NOT NULL DEFAULT 0,
+                pool_id INTEGER,
+                display_name TEXT,
                 current_post_id INTEGER,
                 last_error TEXT,
                 last_sync_at INTEGER,
@@ -57,11 +60,31 @@ class Rule34Database private constructor(context: Context) :
             """.trimIndent(),
         )
         db.execSQL("CREATE INDEX idx_downloads_artist_status ON downloads(artist_tag, status)")
+        createPoolTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL("ALTER TABLE downloads ADD COLUMN preview_url TEXT")
         if (oldVersion < 3) db.execSQL("ALTER TABLE artists ADD COLUMN sync_paused INTEGER NOT NULL DEFAULT 0")
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE artists ADD COLUMN pool_id INTEGER")
+            db.execSQL("ALTER TABLE artists ADD COLUMN display_name TEXT")
+            createPoolTable(db)
+        }
+    }
+
+    private fun createPoolTable(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE pool_posts (
+                pool_tag TEXT NOT NULL,
+                post_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                preview_url TEXT,
+                PRIMARY KEY (pool_tag, post_id),
+                FOREIGN KEY (pool_tag) REFERENCES artists(tag) ON DELETE CASCADE
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX idx_pool_posts_order ON pool_posts(pool_tag, position)")
     }
 
     fun observeArtistSummaries(): Flow<List<ArtistSummary>> =
@@ -76,12 +99,17 @@ class Rule34Database private constructor(context: Context) :
 
     private fun getGalleryPage(tag: String, limit: Int): GalleryPage {
         val db = readableDatabase
-        val count = db.rawQuery("SELECT COUNT(*) FROM downloads WHERE artist_tag = ?", arrayOf(tag))
+        val artist = getArtist(tag)
+        val pool = artist?.poolId != null
+        val join = if (pool) " JOIN pool_posts p ON p.pool_tag = d.artist_tag AND p.post_id = d.post_id" else ""
+        val preview = if (pool) "COALESCE(p.preview_url, d.preview_url)" else "d.preview_url"
+        val order = if (pool) "p.position ASC" else "d.post_id DESC"
+        val count = db.rawQuery("SELECT COUNT(*) FROM downloads d$join WHERE d.artist_tag = ?", arrayOf(tag))
             .use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
         val posts = db.rawQuery(
             """
-            SELECT artist_tag, post_id, file_url, preview_url, local_uri, status
-            FROM downloads WHERE artist_tag = ? ORDER BY post_id DESC LIMIT ?
+            SELECT d.artist_tag, d.post_id, d.file_url, $preview, d.local_uri, d.status
+            FROM downloads d$join WHERE d.artist_tag = ? ORDER BY $order LIMIT ?
             """.trimIndent(),
             arrayOf(tag, limit.coerceAtLeast(1).toString()),
         ).use { cursor ->
@@ -96,14 +124,16 @@ class Rule34Database private constructor(context: Context) :
                 ))
             }
         }
-        return GalleryPage(posts, count)
+        return GalleryPage(posts, count, artist?.displayName ?: tag, artist?.poolId)
     }
 
     @Synchronized
-    fun addArtist(tag: String, sourcePostId: Long): Boolean {
+    fun addArtist(tag: String, sourcePostId: Long, poolId: Long? = null, displayName: String? = null): Boolean {
         val values = ContentValues().apply {
             put("tag", tag)
             put("source_post_id", sourcePostId)
+            if (poolId != null) put("pool_id", poolId)
+            if (displayName != null) put("display_name", displayName)
             put("last_seen_post_id", 0L)
             put("sync_state", SyncState.IDLE.name)
             put("created_at", System.currentTimeMillis())
@@ -130,7 +160,7 @@ class Rule34Database private constructor(context: Context) :
     ).use { it.moveToFirst() }
 
     fun getArtist(tag: String): ArtistRecord? = readableDatabase.rawQuery(
-        "SELECT tag, source_post_id, last_seen_post_id, sync_paused FROM artists WHERE tag = ? LIMIT 1",
+        "SELECT tag, source_post_id, last_seen_post_id, sync_paused, pool_id, display_name FROM artists WHERE tag = ? LIMIT 1",
         arrayOf(tag),
     ).use { cursor ->
         if (!cursor.moveToFirst()) return@use null
@@ -139,6 +169,8 @@ class Rule34Database private constructor(context: Context) :
             sourcePostId = cursor.getLong(1),
             lastSeenPostId = cursor.getLong(2),
             paused = cursor.getInt(3) != 0,
+            poolId = if (cursor.isNull(4)) null else cursor.getLong(4),
+            displayName = if (cursor.isNull(5)) null else cursor.getString(5),
         )
     }
 
@@ -149,6 +181,34 @@ class Rule34Database private constructor(context: Context) :
         buildList {
             while (cursor.moveToNext()) add(cursor.getString(0))
         }
+    }
+
+    fun getKnownPostIds(tag: String): Set<Long> = readableDatabase.rawQuery(
+        "SELECT post_id FROM downloads WHERE artist_tag = ?", arrayOf(tag),
+    ).use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getLong(0)) } }
+
+    @Synchronized
+    fun replacePoolMembership(tag: String, title: String, posts: List<PoolPost>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("pool_posts", "pool_tag = ?", arrayOf(tag))
+            db.compileStatement("INSERT INTO pool_posts(pool_tag, post_id, position, preview_url) VALUES (?, ?, ?, ?)").use { statement ->
+                posts.forEachIndexed { index, post ->
+                    statement.clearBindings()
+                    statement.bindString(1, tag)
+                    statement.bindLong(2, post.id)
+                    statement.bindLong(3, index.toLong())
+                    if (post.previewUrl == null) statement.bindNull(4) else statement.bindString(4, post.previewUrl)
+                    statement.executeInsert()
+                }
+            }
+            db.update("artists", ContentValues().apply { put("display_name", title) }, "tag = ?", arrayOf(tag))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        signalChanged()
     }
 
     @Synchronized
@@ -243,12 +303,16 @@ class Rule34Database private constructor(context: Context) :
         return inserted
     }
 
-    fun getDownloadQueue(tag: String): List<DownloadRecord> = readableDatabase.rawQuery(
+    fun getDownloadQueue(tag: String): List<DownloadRecord> {
+        val pool = getArtist(tag)?.poolId != null
+        val join = if (pool) " JOIN pool_posts p ON p.pool_tag = d.artist_tag AND p.post_id = d.post_id" else ""
+        val order = if (pool) "p.position ASC" else "d.post_id ASC"
+        return readableDatabase.rawQuery(
         """
-        SELECT artist_tag, post_id, file_url, md5, status, bytes_downloaded, total_bytes
-        FROM downloads
-        WHERE artist_tag = ? AND status IN ('PENDING', 'FAILED', 'DOWNLOADING')
-        ORDER BY post_id ASC
+        SELECT d.artist_tag, d.post_id, d.file_url, d.md5, d.status, d.bytes_downloaded, d.total_bytes
+        FROM downloads d$join
+        WHERE d.artist_tag = ? AND d.status IN ('PENDING', 'FAILED', 'DOWNLOADING')
+        ORDER BY $order
         """.trimIndent(),
         arrayOf(tag),
     ).use { cursor ->
@@ -267,6 +331,7 @@ class Rule34Database private constructor(context: Context) :
                 )
             }
         }
+    }
     }
 
     @Synchronized
@@ -359,9 +424,14 @@ class Rule34Database private constructor(context: Context) :
             COALESCE(SUM(CASE WHEN d.status IN ('PENDING', 'DOWNLOADING') THEN 1 ELSE 0 END), 0) AS pending_count,
             COALESCE(SUM(CASE WHEN d.status = 'FAILED' THEN 1 ELSE 0 END), 0) AS failed_count,
             COALESCE(MAX(CASE WHEN d.status = 'DOWNLOADING' THEN d.bytes_downloaded ELSE 0 END), 0) AS current_bytes,
-            COALESCE(MAX(CASE WHEN d.status = 'DOWNLOADING' THEN d.total_bytes ELSE 0 END), 0) AS current_total
+            COALESCE(MAX(CASE WHEN d.status = 'DOWNLOADING' THEN d.total_bytes ELSE 0 END), 0) AS current_total,
+            a.pool_id, a.display_name
         FROM artists a
-        LEFT JOIN downloads d ON a.tag = d.artist_tag
+        LEFT JOIN downloads d ON a.tag = d.artist_tag AND (
+            a.pool_id IS NULL OR EXISTS (
+                SELECT 1 FROM pool_posts p WHERE p.pool_tag = a.tag AND p.post_id = d.post_id
+            )
+        )
         GROUP BY a.tag
         ORDER BY a.created_at DESC
         """.trimIndent(),
@@ -385,6 +455,8 @@ class Rule34Database private constructor(context: Context) :
                         failedCount = cursor.getInt(10),
                         currentBytes = cursor.getLong(11),
                         currentTotalBytes = cursor.getLong(12),
+                        poolId = if (cursor.isNull(13)) null else cursor.getLong(13),
+                        displayName = if (cursor.isNull(14)) null else cursor.getString(14),
                     ),
                 )
             }
@@ -397,7 +469,7 @@ class Rule34Database private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "rule34_downloader.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
 
         @Volatile
         private var instance: Rule34Database? = null

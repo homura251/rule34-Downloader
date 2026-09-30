@@ -13,6 +13,18 @@ object PostUrlParser {
 
         val uri = parseRule34Uri(trimmed) ?: return null
         val params = queryParams(uri)
+        if (params["page"] != "post" || params["s"] != "view") return null
+        return params["id"]?.toLongOrNull()?.takeIf { it > 0 }
+    }
+
+    fun parsePoolId(input: String): Long? {
+        val trimmed = input.trim()
+        if (trimmed.startsWith("pool:", ignoreCase = true)) {
+            return trimmed.substringAfter(':').trim().toLongOrNull()?.takeIf { it > 0 }
+        }
+        val uri = parseRule34Uri(trimmed) ?: return null
+        val params = queryParams(uri)
+        if (params["page"] != "pool" || params["s"] != "show") return null
         return params["id"]?.toLongOrNull()?.takeIf { it > 0 }
     }
 
@@ -22,7 +34,9 @@ object PostUrlParser {
 
         if (trimmed.contains("://")) {
             val uri = parseRule34Uri(trimmed) ?: return null
-            val tags = queryParams(uri)["tags"] ?: return null
+            val params = queryParams(uri)
+            if (params["page"] != "post" || params["s"] != "list") return null
+            val tags = params["tags"] ?: return null
             val parts = tags
                 .trim()
                 .split(Regex("\\s+"))
@@ -47,11 +61,13 @@ object PostUrlParser {
         if (value.length > 200) return null
         if (value.contains('*') || value.contains(',') || value.contains("://")) return null
         if (value.startsWith("-") || value.startsWith("~")) return null
+        if (value.startsWith("pool:", ignoreCase = true)) return null
         return value
     }
 
     private fun parseRule34Uri(value: String): URI? {
         val uri = runCatching { URI(value) }.getOrNull() ?: return null
+        if (uri.scheme?.lowercase() !in setOf("https", "http")) return null
         val host = uri.host?.lowercase() ?: return null
         if (host != "rule34.xxx" && host != "www.rule34.xxx") return null
         return uri

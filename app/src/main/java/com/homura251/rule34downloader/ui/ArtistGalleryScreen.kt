@@ -101,7 +101,7 @@ fun ArtistGalleryScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text(state.artistTag.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text(state.title ?: state.artistTag.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") } },
                 actions = {
                     IconButton(onClick = if (syncing) onPause else onSync, enabled = syncState != SyncState.PAUSING) {
@@ -125,9 +125,9 @@ fun ArtistGalleryScreen(
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("画师作品 · ${state.totalCount} 项", style = MaterialTheme.typography.titleMedium)
+                    Text("${if (state.poolId != null) "图集作品" else "画师作品"} · ${state.totalCount} 项", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "按最新帖子排序 · 已下载图片优先离线读取 · 点图片查看大图",
+                        "${if (state.poolId != null) "按原站图集顺序" else "按最新帖子排序"} · 已下载图片优先离线读取 · 点图片查看大图",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -149,7 +149,7 @@ fun ArtistGalleryScreen(
                     else Icon(Icons.Rounded.Image, null, Modifier.size(48.dp))
                     Text(if (state.loading) "正在读取作品…" else if (syncing) "正在发现作品，列表会自动更新…" else "还没有发现作品")
                     Text("首次同步后，作品及下载状态会显示在这里。", style = MaterialTheme.typography.bodySmall)
-                    if (!syncing && !state.loading) Button(onSync) { Text("同步画师作品") }
+                    if (!syncing && !state.loading) Button(onSync) { Text("同步作品") }
                 }
             }
             itemsIndexed(state.posts, key = { _, post -> post.postId }) { index, post ->

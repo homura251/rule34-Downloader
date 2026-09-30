@@ -88,7 +88,7 @@ fun HomeScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Rule34 Downloader", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "按 artist tag 分目录保存原文件",
+                            "按作者或图集分目录保存原文件",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -105,7 +105,7 @@ fun HomeScreen(
             ExtendedFloatingActionButton(
                 onClick = onAdd,
                 icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                text = { Text("添加作者") },
+                text = { Text("添加作者/图集") },
             )
         },
     ) { padding ->
@@ -191,17 +191,17 @@ private fun EmptyCard(onAdd: () -> Unit) {
                 )
             }
             Text(
-                "还没有作者",
+                "还没有作者或图集",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "直接输入 artist tag，或粘贴 Rule34 帖子/作者搜索链接，然后把该作者原文件下载到独立目录。",
+                "输入 artist tag，或粘贴 Rule34 帖子、作者搜索、Pool 图集链接，将原文件下载到独立目录。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             FilledTonalButton(onClick = onAdd) {
-                Text("添加作者")
+                Text("添加作者/图集")
             }
         }
     }
@@ -234,13 +234,14 @@ private fun ArtistCard(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        artist.tag,
+                        artist.title,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(4.dp))
+                    if (artist.poolId != null) Text("图集 #${artist.poolId}", style = MaterialTheme.typography.labelMedium)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             Icons.Rounded.Folder,
@@ -250,7 +251,7 @@ private fun ArtistCard(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            "Download/Rule34 Downloader/${artist.tag}",
+                            "Download/Rule34 Downloader/${com.homura251.rule34downloader.storage.MediaStoreDownloader.sanitizeFolderName(artist.tag)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -371,8 +372,8 @@ private fun ArtistCard(
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
-            title = { Text("移除 ${artist.tag}？") },
-            text = { Text("停止跟踪该 artist tag；已保存到 Download 的文件不会删除。") },
+            title = { Text("移除 ${artist.title}？") },
+            text = { Text("停止跟踪该作者或图集；已保存到 Download 的文件不会删除。") },
             confirmButton = {
                 FilledTonalButton(
                     onClick = {
