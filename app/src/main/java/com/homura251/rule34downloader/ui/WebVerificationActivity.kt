@@ -27,6 +27,7 @@ class WebVerificationActivity : Activity() {
         super.onCreate(savedInstanceState)
         try {
             val network = Rule34Network.get(this)
+            val verificationUrl = network.verificationUrl
             val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             val padding = (16 * resources.displayMetrics.density).toInt()
             val status = TextView(this).apply {
@@ -51,7 +52,7 @@ class WebVerificationActivity : Activity() {
                 if (isFinishing || verified) return
                 BrowserPagePolicy.snapshot(view) { document, type ->
                     if (!isFinishing && !verified && isRule34UrlString(document.baseUri()) &&
-                        BrowserPagePolicy.matchesRequest(network.verificationUrl, document.baseUri()) && BrowserPagePolicy.isReadable(document, type)) {
+                        BrowserPagePolicy.matchesRequest(verificationUrl, document.baseUri()) && BrowserPagePolicy.isReadable(document, type)) {
                         verified = true
                         network.cookies.flush()
                         Toast.makeText(this, "请求页面已可读取，请重新同步。", Toast.LENGTH_LONG).show()
@@ -76,7 +77,7 @@ class WebVerificationActivity : Activity() {
             }
             view.setDownloadListener { url, _, _, type, _ ->
                 if (!isFinishing && !verified && isRule34UrlString(url) &&
-                    BrowserPagePolicy.matchesRequest(network.verificationUrl, url) && BrowserPagePolicy.isDownloadable(type)) {
+                    BrowserPagePolicy.matchesRequest(verificationUrl, url) && BrowserPagePolicy.isDownloadable(type)) {
                     verified = true
                     network.cookies.flush()
                     Toast.makeText(this, "原文件地址已可访问，请重新同步。", Toast.LENGTH_LONG).show()
@@ -86,7 +87,7 @@ class WebVerificationActivity : Activity() {
             layout.addView(view, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
             setContentView(layout)
             // Keep a valid clearance; resetting it on every visit caused verification loops.
-            view.loadUrl(network.verificationUrl)
+            view.loadUrl(verificationUrl)
             main.postDelayed(object : Runnable {
                 override fun run() {
                     if (!isFinishing && !verified) { inspect(); main.postDelayed(this, 300L) }

@@ -54,13 +54,13 @@ class Rule34Network private constructor(context: Context) {
 
     fun htmlClient(http: OkHttpClient = client, checkActive: () -> Unit = {}): Rule34HtmlClient =
         Rule34HtmlClient(http, checkActive) { url, active ->
-            rememberVerificationUrl(url)
-            pages.read(url, active).also { cookies.flush() }
+            try { pages.read(url, active).also { cookies.flush() } }
+            catch (e: CloudflareChallengeException) { rememberVerificationUrl(url); throw e }
         }
 
     fun openBrowserMedia(url: String, checkActive: () -> Unit, registerCancel: (() -> Unit) -> Closeable): MediaSource {
-        rememberVerificationUrl(url)
-        return media.open(url, checkActive, registerCancel)
+        try { return media.open(url, checkActive, registerCancel) }
+        catch (e: CloudflareChallengeException) { rememberVerificationUrl(url); throw e }
     }
 
     private fun resolveChallenge(request: Request, checkActive: () -> Unit = {}) {
