@@ -64,6 +64,10 @@ class DownloadNotifications(
         NotificationManagerCompat.from(context).notify(notificationId(artistTag), notification)
     }
 
+    fun cancel(artistTag: String) {
+        NotificationManagerCompat.from(context).cancel(notificationId(artistTag))
+    }
+
     private fun progressBuilder(
         artistTag: String,
         completed: Int,

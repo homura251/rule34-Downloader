@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.homura251.rule34downloader.data.CredentialsStore
+import com.homura251.rule34downloader.data.DownloadRecord
+import com.homura251.rule34downloader.data.DownloadStatus
 import com.homura251.rule34downloader.data.Rule34Database
 import com.homura251.rule34downloader.data.SyncState
 import com.homura251.rule34downloader.network.ApiException
@@ -14,90 +16,85 @@ import com.homura251.rule34downloader.network.RetryableApiException
 import com.homura251.rule34downloader.network.Rule34Client
 import com.homura251.rule34downloader.network.Rule34HtmlClient
 import com.homura251.rule34downloader.network.Rule34Network
+import com.homura251.rule34downloader.storage.ExistingDownloads
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import java.io.InterruptedIOException
 import kotlin.coroutines.coroutineContext
 
-class ArtistSyncWorker(
-    appContext: Context,
-    workerParams: WorkerParameters,
-) : CoroutineWorker(appContext, workerParams) {
-
+class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val artistTag = inputData.getString(KEY_ARTIST_TAG)?.trim().orEmpty()
         if (artistTag.isEmpty()) return@withContext Result.failure()
-
         val database = Rule34Database.getInstance(applicationContext)
         val artist = database.getArtist(artistTag) ?: return@withContext Result.success()
-        val credentials = CredentialsStore(applicationContext).get()
-        val apiClient = credentials?.let(::Rule34Client)
-        val pageSize = if (apiClient != null) {
-            Rule34Client.MAX_POSTS_PER_PAGE
-        } else {
-            Rule34HtmlClient.POSTS_PER_PAGE
+        if (artist.paused) {
+            database.finishPaused(artistTag)
+            return@withContext Result.success()
         }
-
+        val workContext = coroutineContext
+        val control = SyncControl { workContext.ensureActive() }
+        SyncControls.register(artistTag, control)
         val notifications = DownloadNotifications(applicationContext)
-        database.setSyncState(artistTag, SyncState.SYNCING)
-        setForeground(notifications.foregroundInfo(artistTag, 0, 0))
-
         try {
-            val htmlClient = if (credentials == null) {
-                Rule34HtmlClient(Rule34Network.get(applicationContext).client)
-            } else {
-                null
-            }
-            val downloader = MediaStoreDownloader(applicationContext)
+            if (!database.setSyncState(artistTag, SyncState.SYNCING)) return@withContext Result.success()
+            setForeground(notifications.foregroundInfo(artistTag, 0, 0))
+            val http = Rule34Network.get(applicationContext).client.newBuilder()
+                .addInterceptor(control.interceptor).build()
+            val credentials = CredentialsStore(applicationContext).get()
+            val api = credentials?.let { Rule34Client(it, control::checkActive) { connection -> control.register(connection::disconnect) } }
+            val html = if (api == null) Rule34HtmlClient(http, control::checkActive) else null
+            val pageSize = if (api != null) Rule34Client.MAX_POSTS_PER_PAGE else Rule34HtmlClient.POSTS_PER_PAGE
+            val existing = ExistingDownloads(applicationContext, artistTag, control::checkActive)
+            val downloader = MediaStoreDownloader(applicationContext, http)
             var page = 0
             var maxSeen = artist.lastSeenPostId
-            do {
-                coroutineContext.ensureActive()
-                val posts = apiClient?.searchPosts(
-                    artistTag = artistTag,
-                    afterPostId = artist.lastSeenPostId,
-                    page = page,
-                    limit = Rule34Client.MAX_POSTS_PER_PAGE,
-                ) ?: htmlClient!!.searchPosts(
-                    artistTag = artistTag,
-                    afterPostId = artist.lastSeenPostId,
-                    page = page,
-                )
-
+            while (true) {
+                control.checkActive()
+                val posts = api?.searchPosts(artistTag, artist.lastSeenPostId, page, pageSize)
+                    ?: html!!.searchPosts(artistTag, artist.lastSeenPostId, page)
                 database.insertDiscoveredPosts(artistTag, posts)
+                // Associate old files as each page is discovered so the gallery can
+                // immediately use local originals, even during a large initial scan.
+                for (post in posts) {
+                    control.checkActive()
+                    val record = DownloadRecord(artistTag, post.id, post.fileUrl, post.md5, DownloadStatus.PENDING, 0, 0)
+                    existing.find(record, control::checkActive)?.let {
+                        database.markDownloaded(artistTag, post.id, it.uri.toString(), it.bytes)
+                    }
+                }
                 posts.maxOfOrNull { it.id }?.let { maxSeen = maxOf(maxSeen, it) }
                 page++
                 if (posts.size < pageSize) break
-                delay(if (apiClient != null) API_PAGE_DELAY_MS else HTML_PAGE_DELAY_MS)
-            } while (true)
-
-            if (maxSeen > artist.lastSeenPostId) {
-                database.updateLastSeenPostId(artistTag, maxSeen)
+                delay(if (api != null) API_PAGE_DELAY_MS else HTML_PAGE_DELAY_MS)
             }
-
+            control.checkActive()
+            // Commit the discovery watermark only after every page has been saved.
+            if (maxSeen > artist.lastSeenPostId) database.updateLastSeenPostId(artistTag, maxSeen)
             val queue = database.getDownloadQueue(artistTag)
             var completed = 0
-            var downloadedThisRun = 0
+            var downloaded = 0
             var failed = 0
-            notifications.updateProgress(artistTag, completed, queue.size, null)
-            setForeground(notifications.foregroundInfo(artistTag, completed, queue.size))
-
+            setForeground(notifications.foregroundInfo(artistTag, 0, queue.size))
             for (record in queue) {
-                coroutineContext.ensureActive()
+                control.checkActive()
+                val old = existing.find(record, control::checkActive)
+                if (old != null) {
+                    database.markDownloaded(artistTag, record.postId, old.uri.toString(), old.bytes)
+                    completed++
+                    continue
+                }
                 database.markDownloading(artistTag, record.postId, record.totalBytes)
                 notifications.updateProgress(artistTag, completed, queue.size, record.postId)
-
                 var lastProgressUpdate = 0L
                 try {
-                    val result = downloader.download(
-                        record = record,
-                        onHeaders = { total ->
-                            database.markDownloading(artistTag, record.postId, total)
-                        },
+                    val result = downloader.download(record,
+                        onHeaders = { total -> control.checkActive(); database.markDownloading(artistTag, record.postId, total) },
                         onProgress = { bytes, total ->
+                            control.checkActive()
                             val now = System.currentTimeMillis()
                             if (now - lastProgressUpdate >= PROGRESS_UPDATE_INTERVAL_MS || bytes == total) {
                                 database.updateDownloadProgress(artistTag, record.postId, bytes, total)
@@ -105,78 +102,44 @@ class ArtistSyncWorker(
                             }
                         },
                     )
-                    database.markDownloaded(artistTag, record.postId, result.uri.toString())
-                    if (!result.existed) downloadedThisRun++
-                } catch (e: InterruptedIOException) {
-                    throw e
-                } catch (e: CloudflareChallengeException) {
-                    database.markFailed(artistTag, record.postId, e.message.orEmpty())
-                    throw HtmlChallengeException(e.message.orEmpty(), e)
+                    database.markDownloaded(artistTag, record.postId, result.uri.toString(), result.bytesWritten)
+                    downloaded++
                 } catch (e: Exception) {
+                    control.checkActive() // Pause/cancellation must never count as a failed file.
+                    if (e is CloudflareChallengeException) {
+                        database.markFailed(artistTag, record.postId, e.message.orEmpty())
+                        throw HtmlChallengeException(e.message.orEmpty(), e)
+                    }
                     failed++
-                    database.markFailed(
-                        artistTag,
-                        record.postId,
-                        e.message ?: e.javaClass.simpleName,
-                    )
+                    database.markFailed(artistTag, record.postId, e.message ?: e.javaClass.simpleName)
                 }
                 completed++
                 notifications.updateProgress(artistTag, completed, queue.size, null)
             }
-
-            val finalState = if (failed > 0) SyncState.ERROR else SyncState.COMPLETE
-            database.setSyncState(
-                artistTag,
-                finalState,
-                error = if (failed > 0) "$failed 个文件下载失败，将在下次同步重试。" else null,
-                markSyncTime = true,
-            )
-            notifications.showFinished(artistTag, downloadedThisRun, failed)
-
-            if (failed > 0 && runAttemptCount < MAX_FILE_RETRY_RUNS) {
-                Result.retry()
-            } else {
-                Result.success()
-            }
-        } catch (e: AuthException) {
-            database.setSyncState(
-                artistTag,
-                SyncState.ERROR,
-                error = e.message,
-                markSyncTime = true,
-            )
-            Result.failure()
-        } catch (e: RetryableApiException) {
-            database.setSyncState(
-                artistTag,
-                SyncState.ERROR,
-                error = e.message,
-                markSyncTime = true,
-            )
-            Result.retry()
-        } catch (e: ApiException) {
-            database.setSyncState(
-                artistTag,
-                SyncState.ERROR,
-                error = e.message,
-                markSyncTime = true,
-            )
-            Result.failure()
-        } catch (e: InterruptedIOException) {
-            database.setSyncState(
-                artistTag,
-                SyncState.IDLE,
-                error = "同步已取消。",
-            )
-            Result.failure()
+            control.checkActive()
+            database.setSyncState(artistTag, if (failed > 0) SyncState.ERROR else SyncState.COMPLETE,
+                error = if (failed > 0) "$failed 个文件下载失败，将在下次同步重试。" else null, markSyncTime = true)
+            if (!database.isPaused(artistTag)) notifications.showFinished(artistTag, downloaded, failed)
+            if (failed > 0 && runAttemptCount < MAX_FILE_RETRY_RUNS) Result.retry() else Result.success()
         } catch (e: Exception) {
-            database.setSyncState(
-                artistTag,
-                SyncState.ERROR,
-                error = e.message ?: e.javaClass.simpleName,
-                markSyncTime = true,
-            )
-            Result.retry()
+            when {
+                control.paused || database.isPaused(artistTag) -> Result.success()
+                e is CancellationException -> {
+                    database.setSyncState(artistTag, SyncState.IDLE)
+                    throw e
+                }
+                else -> {
+                    database.setSyncState(artistTag, SyncState.ERROR, error = e.message ?: e.javaClass.simpleName, markSyncTime = true)
+                    if (e is AuthException || (e is ApiException && e !is RetryableApiException)) Result.failure() else Result.retry()
+                }
+            }
+        } finally {
+            database.resetInProgress(artistTag)
+            SyncControls.unregister(artistTag, control)
+            if (database.isPaused(artistTag)) {
+                notifications.cancel(artistTag)
+                database.finishPaused(artistTag)
+            }
         }
     }
 

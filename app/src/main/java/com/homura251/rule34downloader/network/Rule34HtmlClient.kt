@@ -12,7 +12,7 @@ import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 
-class Rule34HtmlClient(private val httpClient: OkHttpClient) {
+class Rule34HtmlClient(private val httpClient: OkHttpClient, private val checkActive: () -> Unit = {}) {
     data class ResolvedPost(
         val post: Rule34Post,
         val artists: List<Rule34Tag>,
@@ -43,7 +43,9 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient) {
         val postIds = parsePostIds(document)
         val previews = parseThumbnailUrls(document)
         return postIds.mapIndexed { index, postId ->
+            checkActive()
             if (index > 0) Thread.sleep(DETAIL_REQUEST_DELAY_MS)
+            checkActive()
             val post = parsePostDocument(fetchDocument(postUrl(postId)), postId)
             post.copy(previewUrl = previews[postId] ?: post.previewUrl)
         }
@@ -52,6 +54,7 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient) {
     private fun fetchDocument(url: String): Document {
         var lastStatus = 0
         repeat(MAX_REQUEST_ATTEMPTS) { attempt ->
+            checkActive()
             try {
                 val request = Request.Builder().url(url)
                     .header("Accept", "text/html,application/xhtml+xml")
@@ -78,6 +81,7 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient) {
             } catch (e: CloudflareChallengeException) {
                 throw HtmlChallengeException(e.message.orEmpty(), e)
             } catch (e: IOException) {
+                checkActive()
                 if (Thread.currentThread().isInterrupted) throw e
                 if (attempt == MAX_REQUEST_ATTEMPTS - 1) {
                     throw RetryableApiException(

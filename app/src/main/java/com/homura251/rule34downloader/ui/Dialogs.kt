@@ -152,8 +152,9 @@ fun SettingsDialog(
     onDismiss: () -> Unit,
     onSave: (SettingsState) -> Unit,
     onVerifyWeb: () -> Unit,
+    onLinkDownloads: () -> Unit,
 ) {
-    var draft by remember(initial) { mutableStateOf(initial) }
+    var draft by remember(initial.userId, initial.apiKey, initial.autoSyncEnabled, initial.syncIntervalMinutes, initial.wifiOnly) { mutableStateOf(initial) }
     var showKey by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -162,7 +163,7 @@ fun SettingsDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Key, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("API 与自动同步")
+                Text("下载与同步设置")
             }
         },
         text = {
@@ -187,6 +188,14 @@ fun SettingsDialog(
                 TextButton(onClick = onVerifyWeb) {
                     Text("网页验证")
                 }
+                TextButton(onClick = onLinkDownloads) {
+                    Text(if (initial.existingDownloadsLinked) "重新关联旧下载目录" else "关联旧下载目录")
+                }
+                Text(
+                    "重装后选择原来的 Download/Rule34 Downloader 文件夹（也可选择单个画师文件夹）。重新添加同一画师并同步，已有文件会校验后复用。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text(
                     "匿名模式遇到 Cloudflare 人机验证时，在这里完成验证，再重新同步。",
                     style = MaterialTheme.typography.bodySmall,

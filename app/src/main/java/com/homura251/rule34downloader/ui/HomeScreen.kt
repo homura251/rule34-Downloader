@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
@@ -75,6 +76,7 @@ fun HomeScreen(
     onSettings: () -> Unit,
     onAdd: () -> Unit,
     onSync: (String) -> Unit,
+    onPause: (String) -> Unit,
     onRemove: (String) -> Unit,
     onBrowse: (String) -> Unit,
 ) {
@@ -127,6 +129,7 @@ fun HomeScreen(
                 ArtistCard(
                     artist = artist,
                     onSync = { onSync(artist.tag) },
+                    onPause = { onPause(artist.tag) },
                     onRemove = { onRemove(artist.tag) },
                     onBrowse = { onBrowse(artist.tag) },
                 )
@@ -208,6 +211,7 @@ private fun EmptyCard(onAdd: () -> Unit) {
 private fun ArtistCard(
     artist: ArtistSummary,
     onSync: () -> Unit,
+    onPause: () -> Unit,
     onRemove: () -> Unit,
     onBrowse: () -> Unit,
 ) {
@@ -332,8 +336,8 @@ private fun ArtistCard(
                     Text("移除")
                 }
                 FilledTonalButton(
-                    onClick = onSync,
-                    enabled = artist.syncState != SyncState.SYNCING,
+                    onClick = if (artist.syncState == SyncState.SYNCING) onPause else onSync,
+                    enabled = artist.syncState != SyncState.PAUSING,
                 ) {
                     AnimatedContent(
                         targetState = artist.syncState == SyncState.SYNCING,
@@ -342,10 +346,7 @@ private fun ArtistCard(
                     ) { syncing ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (syncing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                )
+                                Icon(Icons.Rounded.Pause, null, Modifier.size(18.dp))
                             } else {
                                 Icon(
                                     Icons.Rounded.Sync,
@@ -354,7 +355,12 @@ private fun ArtistCard(
                                 )
                             }
                             Spacer(Modifier.width(6.dp))
-                            Text(if (syncing) "同步中" else "同步")
+                            Text(when (artist.syncState) {
+                                SyncState.SYNCING -> "暂停"
+                                SyncState.PAUSING -> "暂停中"
+                                SyncState.PAUSED -> "继续"
+                                else -> "同步"
+                            })
                         }
                     }
                 }
@@ -400,6 +406,7 @@ private fun StatusPill(state: SyncState) {
         SyncState.COMPLETE -> MaterialTheme.colorScheme.primaryContainer
         SyncState.ERROR -> MaterialTheme.colorScheme.errorContainer
         SyncState.SYNCING -> MaterialTheme.colorScheme.secondaryContainer
+        SyncState.PAUSING, SyncState.PAUSED -> MaterialTheme.colorScheme.secondaryContainer
         SyncState.IDLE -> MaterialTheme.colorScheme.surfaceVariant
     }
 
@@ -423,6 +430,7 @@ private fun StatusPill(state: SyncState) {
                     SyncState.COMPLETE -> Icons.Rounded.CheckCircle
                     SyncState.ERROR -> Icons.Rounded.ErrorOutline
                     SyncState.SYNCING -> Icons.Rounded.CloudSync
+                    SyncState.PAUSING, SyncState.PAUSED -> Icons.Rounded.Pause
                     SyncState.IDLE -> Icons.Rounded.Schedule
                 }
                 Icon(
@@ -436,6 +444,8 @@ private fun StatusPill(state: SyncState) {
                         SyncState.COMPLETE -> "已完成"
                         SyncState.ERROR -> "需重试"
                         SyncState.SYNCING -> "同步中"
+                        SyncState.PAUSING -> "暂停中"
+                        SyncState.PAUSED -> "已暂停"
                         SyncState.IDLE -> "等待"
                     },
                     style = MaterialTheme.typography.labelMedium,
