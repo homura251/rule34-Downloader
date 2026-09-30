@@ -22,11 +22,15 @@ import com.homura251.rule34downloader.storage.ExistingDownloads
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.coroutineContext as currentCoroutineContext
 
 class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -37,16 +41,19 @@ class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : Co
     }
 
     private suspend fun syncArtist(artistTag: String): Result {
-        coroutineContext.ensureActive()
+        currentCoroutineContext.ensureActive()
         val database = Rule34Database.getInstance(applicationContext)
         val artist = database.getArtist(artistTag) ?: return Result.success()
         if (artist.paused) {
             database.finishPaused(artistTag)
             return Result.success()
         }
-        val workContext = coroutineContext
+        val workContext = currentCoroutineContext
         val control = SyncControl { workContext.ensureActive() }
         SyncControls.register(artistTag, control)
+        val cancellationWatcher = CoroutineScope(workContext).launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { control.pause() }
+        }
         val notifications = DownloadNotifications(applicationContext)
         return try {
             if (!database.setSyncState(artistTag, SyncState.SYNCING)) return Result.success()
@@ -173,6 +180,7 @@ class ArtistSyncWorker(appContext: Context, workerParams: WorkerParameters) : Co
                 }
             }
         } finally {
+            cancellationWatcher.cancel()
             database.resetInProgress(artistTag)
             SyncControls.unregister(artistTag, control)
             if (database.isPaused(artistTag)) {

@@ -199,6 +199,7 @@ class DownloadReliabilityTest {
             })!!
         try {
             insert(tag, 1); insert(tag, 0); insert(other, 1)
+            assertEquals(2, fileCount(tag)); assertEquals(1, fileCount(other))
             MediaStoreDownloader(context).cleanInterruptedFiles(tag)
             assertEquals(1, fileCount(tag)); assertEquals(1, fileCount(other))
         } finally { deleteFiles(tag); deleteFiles(other) }
@@ -219,11 +220,11 @@ class DownloadReliabilityTest {
     private fun pages(timeout: Long = 10_000) = BrowserPageReader(context, network::createWebView, local, timeout)
     private fun media() = BrowserMediaReader(context, network::createWebView, local)
     private fun md5(bytes: ByteArray) = MessageDigest.getInstance("MD5").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
-    private fun fileCount(tag: String): Int = context.contentResolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-        arrayOf(MediaStore.Downloads._ID), "relative_path = ?", arrayOf(MediaStoreDownloader.buildRelativePath(tag)), null)!!.use { it.count }
+    private fun fileCount(tag: String): Int = MediaStoreDownloader.queryIncludingPending(context.contentResolver,
+        "relative_path = ?", arrayOf(MediaStoreDownloader.buildRelativePath(tag)))!!.use { it.count }
     private fun deleteFiles(tag: String) {
-        context.contentResolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Downloads._ID),
-            "relative_path = ?", arrayOf(MediaStoreDownloader.buildRelativePath(tag)), null)?.use {
+        MediaStoreDownloader.queryIncludingPending(context.contentResolver,
+            "relative_path = ?", arrayOf(MediaStoreDownloader.buildRelativePath(tag)))?.use {
             while (it.moveToNext()) context.contentResolver.delete(ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, it.getLong(0)), null, null)
         }
     }

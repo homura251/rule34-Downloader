@@ -4,6 +4,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.os.Build
+import android.os.Bundle
+import android.content.ContentResolver
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import com.homura251.rule34downloader.data.DownloadRecord
@@ -102,9 +105,9 @@ class MediaStoreDownloader(
     /** Called only while holding the artist's exclusive worker gate. */
     fun cleanInterruptedFiles(artistTag: String) {
         val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        context.contentResolver.query(collection, arrayOf(MediaStore.Downloads._ID),
+        queryIncludingPending(context.contentResolver,
             "relative_path = ? AND is_pending = 1 AND owner_package_name = ?",
-            arrayOf(buildRelativePath(artistTag), context.packageName), null)?.use { cursor ->
+            arrayOf(buildRelativePath(artistTag), context.packageName))?.use { cursor ->
             while (cursor.moveToNext()) {
                 checkDownloadActive()
                 try {
@@ -139,6 +142,18 @@ class MediaStoreDownloader(
             }
 
     companion object {
+        @Suppress("DEPRECATION")
+        internal fun queryIncludingPending(resolver: ContentResolver, selection: String, args: Array<String>): android.database.Cursor? {
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            return if (Build.VERSION.SDK_INT >= 30) resolver.query(collection, arrayOf(MediaStore.Downloads._ID),
+                Bundle().apply {
+                    putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                    putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args)
+                    putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+                }, null)
+            else resolver.query(MediaStore.setIncludePending(collection), arrayOf(MediaStore.Downloads._ID), selection, args, null)
+        }
+
         internal fun requireMediaResponse(response: Response) {
             if (!response.isSuccessful) throw IOException("原文件下载失败（HTTP ${response.code}）")
             val type = response.body?.contentType()
