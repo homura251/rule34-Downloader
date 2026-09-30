@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
@@ -45,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -74,6 +76,7 @@ fun HomeScreen(
     onAdd: () -> Unit,
     onSync: (String) -> Unit,
     onRemove: (String) -> Unit,
+    onBrowse: (String) -> Unit,
 ) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -125,6 +128,7 @@ fun HomeScreen(
                     artist = artist,
                     onSync = { onSync(artist.tag) },
                     onRemove = { onRemove(artist.tag) },
+                    onBrowse = { onBrowse(artist.tag) },
                 )
             }
         }
@@ -205,6 +209,7 @@ private fun ArtistCard(
     artist: ArtistSummary,
     onSync: () -> Unit,
     onRemove: () -> Unit,
+    onBrowse: () -> Unit,
 ) {
     var confirmRemove by remember { mutableStateOf(false) }
 
@@ -299,6 +304,12 @@ private fun ArtistCard(
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            OutlinedButton(onClick = onBrowse, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("查看作品")
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),

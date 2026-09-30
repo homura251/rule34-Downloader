@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class Rule34Database private constructor(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -41,6 +42,7 @@ class Rule34Database private constructor(context: Context) :
                 artist_tag TEXT NOT NULL,
                 post_id INTEGER NOT NULL,
                 file_url TEXT NOT NULL,
+                preview_url TEXT,
                 md5 TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL,
                 bytes_downloaded INTEGER NOT NULL DEFAULT 0,
@@ -56,12 +58,44 @@ class Rule34Database private constructor(context: Context) :
         db.execSQL("CREATE INDEX idx_downloads_artist_status ON downloads(artist_tag, status)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) db.execSQL("ALTER TABLE downloads ADD COLUMN preview_url TEXT")
+    }
 
     fun observeArtistSummaries(): Flow<List<ArtistSummary>> =
         changes
             .map { listArtistSummaries() }
             .flowOn(Dispatchers.IO)
+
+    fun observeGallery(tag: String, limit: Int): Flow<GalleryPage> = changes
+        .map { getGalleryPage(tag, limit) }
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.IO)
+
+    private fun getGalleryPage(tag: String, limit: Int): GalleryPage {
+        val db = readableDatabase
+        val count = db.rawQuery("SELECT COUNT(*) FROM downloads WHERE artist_tag = ?", arrayOf(tag))
+            .use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
+        val posts = db.rawQuery(
+            """
+            SELECT artist_tag, post_id, file_url, preview_url, local_uri, status
+            FROM downloads WHERE artist_tag = ? ORDER BY post_id DESC LIMIT ?
+            """.trimIndent(),
+            arrayOf(tag, limit.coerceAtLeast(1).toString()),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(GalleryPost(
+                    artistTag = cursor.getString(0),
+                    postId = cursor.getLong(1),
+                    fileUrl = cursor.getString(2),
+                    previewUrl = if (cursor.isNull(3)) null else cursor.getString(3),
+                    localUri = if (cursor.isNull(4)) null else cursor.getString(4),
+                    status = DownloadStatus.valueOf(cursor.getString(5)),
+                ))
+            }
+        }
+        return GalleryPage(posts, count)
+    }
 
     @Synchronized
     fun addArtist(tag: String, sourcePostId: Long): Boolean {
@@ -151,9 +185,9 @@ class Rule34Database private constructor(context: Context) :
             val statement = db.compileStatement(
                 """
                 INSERT OR IGNORE INTO downloads(
-                    artist_tag, post_id, file_url, md5, status,
+                    artist_tag, post_id, file_url, md5, preview_url, status,
                     bytes_downloaded, total_bytes, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 0, 0, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)
                 """.trimIndent(),
             )
             val now = System.currentTimeMillis()
@@ -163,8 +197,9 @@ class Rule34Database private constructor(context: Context) :
                 statement.bindLong(2, post.id)
                 statement.bindString(3, post.fileUrl)
                 statement.bindString(4, post.md5)
-                statement.bindString(5, DownloadStatus.PENDING.name)
-                statement.bindLong(6, now)
+                if (post.previewUrl == null) statement.bindNull(5) else statement.bindString(5, post.previewUrl)
+                statement.bindString(6, DownloadStatus.PENDING.name)
+                statement.bindLong(7, now)
                 if (statement.executeInsert() != -1L) inserted++
             }
             db.setTransactionSuccessful()
@@ -325,7 +360,7 @@ class Rule34Database private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "rule34_downloader.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
 
         @Volatile
         private var instance: Rule34Database? = null

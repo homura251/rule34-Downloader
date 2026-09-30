@@ -5,6 +5,22 @@ import org.junit.Test
 
 class Rule34HtmlClientTest {
     @Test
+    fun parsesAndNormalizesThumbnailsIncludingLazyImages() {
+        val html = """
+            <div class="image-list">
+              <span class="thumb" id="s42"><img src="//rule34.xxx/thumbs/42.jpg"></span>
+              <span class="thumb"><a href="/index.php?page=post&s=view&id=43"><img data-src="http://rule34.xxx/thumbs/43.jpg" src="placeholder.jpg"></a></span>
+              <span class="thumb" id="s44"><img src="/thumbs/44.jpg"></span>
+              <span class="thumb" id="s45"><img src="javascript:alert(1)"></span>
+              <span class="thumb" id="s46"><img></span>
+            </div>
+        """.trimIndent()
+        assertEquals(
+            mapOf(42L to "https://rule34.xxx/thumbs/42.jpg", 43L to "https://rule34.xxx/thumbs/43.jpg", 44L to "https://rule34.xxx/thumbs/44.jpg"),
+            Rule34HtmlClient.thumbnailUrlsFromHtml(html),
+        )
+    }
+    @Test
     fun parsesPostIdsFromThumbnailItems() {
         val html = """
             <div class="image-list">

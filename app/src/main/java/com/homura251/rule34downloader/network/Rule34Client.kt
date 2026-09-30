@@ -229,6 +229,8 @@ class Rule34Client(
                 .filter(String::isNotEmpty),
             width = json.optInt("width").takeIf { it > 0 },
             height = json.optInt("height").takeIf { it > 0 },
+            previewUrl = normalizeFileUrl(json.optString("preview_url"))
+                ?: normalizeFileUrl(json.optString("sample_url")),
         )
     }
 

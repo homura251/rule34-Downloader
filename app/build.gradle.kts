@@ -11,8 +11,8 @@ android {
         applicationId = "com.homura251.rule34downloader"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -52,6 +52,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("org.jsoup:jsoup:1.23.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-gif:2.7.0")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

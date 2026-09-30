@@ -41,9 +41,11 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient) {
             "$SITE/index.php?page=post&s=list&tags=${encode(query)}&pid=$offset",
         )
         val postIds = parsePostIds(document)
+        val previews = parseThumbnailUrls(document)
         return postIds.mapIndexed { index, postId ->
             if (index > 0) Thread.sleep(DETAIL_REQUEST_DELAY_MS)
-            parsePostDocument(fetchDocument(postUrl(postId)), postId)
+            val post = parsePostDocument(fetchDocument(postUrl(postId)), postId)
+            post.copy(previewUrl = previews[postId] ?: post.previewUrl)
         }
     }
 
@@ -101,6 +103,8 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient) {
             fileUrl = fileUrl,
             md5 = md5,
             tags = parseAllTags(document),
+            previewUrl = document.selectFirst("img#image")?.absUrl("src")
+                ?.let { normalizeMediaUrl(it, document.baseUri()) },
         )
     }
 
@@ -229,20 +233,34 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient) {
             return anchor.absUrl("href").ifBlank { anchor.attr("href") }
         }
 
+        internal fun thumbnailUrlsFromHtml(html: String): Map<Long, String> =
+            parseThumbnailUrls(Jsoup.parse(html, SITE))
+
+        private fun parseThumbnailUrls(document: Document): Map<Long, String> = buildMap {
+            document.select(".image-list span.thumb").forEach { item ->
+                val id = postIdFromThumbnail(item) ?: return@forEach
+                val image = item.selectFirst("img") ?: return@forEach
+                val raw = image.attr("data-src").ifBlank { image.attr("src") }
+                val uri = runCatching { URI(document.baseUri()).resolve(raw) }.getOrNull() ?: return@forEach
+                if (raw.isNotBlank() && uri.scheme in listOf("http", "https")) {
+                    val url = if (uri.scheme == "http") {
+                        URI("https", uri.userInfo, uri.host, uri.port, uri.path, uri.query, uri.fragment).toString()
+                    } else uri.toString()
+                    put(id, url)
+                }
+            }
+        }
+
         private fun parsePostIds(document: Document): List<Long> =
             document.select(".image-list span.thumb")
-                .mapNotNull { item ->
-                    item.id()
-                        .takeIf { it.matches(Regex("^s\\d+$")) }
-                        ?.drop(1)
-                        ?.toLongOrNull()
-                        ?: item.selectFirst("a[href*=id=]")
-                            ?.attr("href")
-                            ?.let { href ->
-                                Regex("[?&]id=(\\d+)").find(href)?.groupValues?.getOrNull(1)?.toLongOrNull()
-                            }
-                }
+                .mapNotNull(::postIdFromThumbnail)
                 .distinct()
+
+        private fun postIdFromThumbnail(item: Element): Long? =
+            item.id().takeIf { it.matches(Regex("^s\\d+$")) }?.drop(1)?.toLongOrNull()
+                ?: item.selectFirst("a[href*=id=]")?.attr("href")?.let { href ->
+                    Regex("[?&]id=(\\d+)").find(href)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                }
     }
 }
 
