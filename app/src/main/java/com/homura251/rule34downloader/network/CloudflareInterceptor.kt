@@ -61,8 +61,9 @@ class CloudflareInterceptor(
             if (contentType.isNotEmpty() && !contentType.contains("html", true)) return false
             val body = response.peekBody(64L * 1024).string()
             return body.contains("_cf_chl_opt", true) ||
-                body.contains("/cdn-cgi/challenge-platform/", true) ||
-                body.contains("<title>Just a moment", true)
+                body.contains("/orchestrate/chl_page/", true) ||
+                body.contains("<title>Just a moment", true) ||
+                body.contains("id=\"challenge-form\"", true)
         }
     }
 }

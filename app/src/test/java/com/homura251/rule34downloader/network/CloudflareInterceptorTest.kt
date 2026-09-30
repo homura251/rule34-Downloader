@@ -159,10 +159,14 @@ class CloudflareInterceptorTest {
     }
 
     @Test fun ordinaryHtmlResponseRemainsReadableAfterChallengeDetection() {
+        val html = """
+            <html><title>Rule34</title><body>original post page</body>
+            <script src="/cdn-cgi/challenge-platform/h/g/scripts/jsd/example.js"></script></html>
+        """.trimIndent()
         server.enqueue(MockResponse().setHeader("Server", "cloudflare")
-            .setHeader("Content-Type", "text/html").setBody("original post page"))
+            .setHeader("Content-Type", "text/html").setBody(html))
         client().newCall(Request.Builder().url(server.url("/")).build()).execute().use {
-            assertEquals("original post page", it.body!!.string())
+            assertEquals(html, it.body!!.string())
         }
         assertEquals(0, resolutions)
     }

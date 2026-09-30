@@ -193,15 +193,12 @@ class Rule34HtmlClient(private val httpClient: OkHttpClient) {
     }
 
     private fun looksLikeChallenge(document: Document): Boolean {
-        val title = document.title()
-        val body = document.body()?.text().orEmpty()
+        val title = document.title().trim()
         val html = document.html()
-        return title.contains("Just a moment", ignoreCase = true) ||
-            title.contains("CAPTCHA", ignoreCase = true) ||
-            body.contains("Checking your browser", ignoreCase = true) ||
-            body.contains("Enable JavaScript and cookies", ignoreCase = true) ||
-            html.contains("challenge-platform", ignoreCase = true) ||
-            html.contains("_cf_chl_opt", ignoreCase = true)
+        return title.startsWith("Just a moment", ignoreCase = true) ||
+            title.equals("CAPTCHA", ignoreCase = true) ||
+            html.contains("_cf_chl_opt", ignoreCase = true) ||
+            document.selectFirst("#challenge-form, #cf-challenge-running") != null
     }
 
     private fun postUrl(postId: Long): String =
