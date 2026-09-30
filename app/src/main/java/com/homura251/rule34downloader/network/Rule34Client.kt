@@ -8,6 +8,7 @@ import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.IOException
+import java.io.Closeable
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
@@ -16,6 +17,8 @@ import javax.net.ssl.HttpsURLConnection
 
 class Rule34Client(
     private val credentials: ApiCredentials,
+    private val checkActive: () -> Unit = {},
+    private val registerConnection: (HttpURLConnection) -> Closeable = { Closeable {} },
 ) {
     fun getPost(postId: Long): Rule34Post {
         val posts = requestObjects(
@@ -132,6 +135,7 @@ class Rule34Client(
             "${encode(name)}=${encode(value)}"
         }
         val url = "$API_ENDPOINT?$query"
+        checkActive()
         val connection = (URI(url).toURL().openConnection() as HttpsURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MS
@@ -141,10 +145,12 @@ class Rule34Client(
             setRequestProperty("User-Agent", USER_AGENT)
         }
 
+        val registration = registerConnection(connection)
         try {
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            checkActive()
             when {
                 status == HttpURLConnection.HTTP_UNAUTHORIZED -> {
                     throw AuthException("API 认证失败，请检查 User ID 与 API Key。")
@@ -160,8 +166,10 @@ class Rule34Client(
         } catch (e: ApiException) {
             throw e
         } catch (e: IOException) {
+            checkActive()
             throw RetryableApiException("网络连接失败：${e.message ?: "I/O error"}", e)
         } finally {
+            registration.close()
             connection.disconnect()
         }
     }

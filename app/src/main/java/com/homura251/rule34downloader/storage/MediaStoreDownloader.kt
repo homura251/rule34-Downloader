@@ -1,6 +1,5 @@
 package com.homura251.rule34downloader.storage
 
-import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -11,6 +10,7 @@ import com.homura251.rule34downloader.data.DownloadRecord
 import com.homura251.rule34downloader.network.Rule34Network
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.OkHttpClient
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.URI
@@ -18,8 +18,9 @@ import java.util.concurrent.TimeUnit
 
 class MediaStoreDownloader(
     private val context: Context,
+    client: OkHttpClient = Rule34Network.get(context).client,
 ) {
-    private val httpClient = Rule34Network.get(context).client.newBuilder()
+    private val httpClient = client.newBuilder()
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
     data class Result(
@@ -36,9 +37,6 @@ class MediaStoreDownloader(
         val extension = extensionFromUrl(record.fileUrl)
         val displayName = buildFileName(record.postId, record.md5, extension)
         val relativePath = buildRelativePath(record.artistTag)
-        findExisting(displayName, relativePath)?.let { existing ->
-            return Result(existing, 0L, true)
-        }
 
         val request = Request.Builder().url(record.fileUrl)
             .header("Referer", "${Rule34Network.SITE}/index.php?page=post&s=view&id=${record.postId}")
@@ -98,25 +96,6 @@ class MediaStoreDownloader(
         } catch (e: Exception) {
             insertedUri?.let { context.contentResolver.delete(it, null, null) }
             throw e
-        }
-    }
-
-    private fun findExisting(displayName: String, relativePath: String): Uri? {
-        val projection = arrayOf(MediaStore.Downloads._ID)
-        val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ? AND ${MediaStore.Downloads.RELATIVE_PATH} = ?"
-        val args = arrayOf(displayName, relativePath)
-        return context.contentResolver.query(
-            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            projection,
-            selection,
-            args,
-            null,
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            ContentUris.withAppendedId(
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                cursor.getLong(0),
-            )
         }
     }
 

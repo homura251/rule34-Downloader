@@ -1,6 +1,8 @@
 package com.homura251.rule34downloader.ui
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.homura251.rule34downloader.data.ApiCredentials
@@ -42,6 +44,7 @@ data class SettingsState(
     val autoSyncEnabled: Boolean = false,
     val syncIntervalMinutes: Long = AppPreferences.DEFAULT_INTERVAL_MINUTES,
     val wifiOnly: Boolean = false,
+    val existingDownloadsLinked: Boolean = false,
 )
 
 sealed interface UiEvent {
@@ -204,7 +207,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun syncArtist(tag: String) {
-        SyncScheduler.enqueueArtistSync(getApplication(), tag)
+        viewModelScope.launch(Dispatchers.IO) {
+            SyncScheduler.enqueueArtistSync(getApplication(), tag, resume = database.isPaused(tag))
+        }
+    }
+
+    fun pauseArtist(tag: String) {
+        viewModelScope.launch(Dispatchers.IO) { SyncScheduler.pauseArtistSync(getApplication(), tag) }
+    }
+
+    fun downloadsFolderUri(): Uri? = preferences.existingDownloadsTreeUri?.let(Uri::parse)
+
+    fun linkDownloadsFolder(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val resolver = getApplication<Application>().contentResolver
+                resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val old = preferences.existingDownloadsTreeUri
+                preferences.existingDownloadsTreeUri = uri.toString()
+                if (old != null && old != uri.toString()) runCatching {
+                    resolver.releasePersistableUriPermission(Uri.parse(old), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                _settings.value = _settings.value.copy(existingDownloadsLinked = true)
+                eventsChannel.send(UiEvent.Message("旧下载目录已关联。重新添加同一画师并同步，会校验并复用已有文件。"))
+            } catch (_: Exception) {
+                eventsChannel.send(UiEvent.Message("目录授权失败，请重新选择 Rule34 Downloader 文件夹。"))
+            }
+        }
     }
 
     fun openGallery(tag: String) {
@@ -293,6 +322,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             autoSyncEnabled = preferences.autoSyncEnabled,
             syncIntervalMinutes = preferences.syncIntervalMinutes,
             wifiOnly = preferences.wifiOnly,
+            existingDownloadsLinked = preferences.existingDownloadsTreeUri != null,
         )
     }
 

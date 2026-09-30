@@ -33,6 +33,8 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -75,15 +77,18 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.homura251.rule34downloader.data.DownloadStatus
 import com.homura251.rule34downloader.data.GalleryPost
+import com.homura251.rule34downloader.data.SyncState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ArtistGalleryScreen(
     state: GalleryState,
     syncing: Boolean,
+    syncState: SyncState,
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onSync: () -> Unit,
+    onPause: () -> Unit,
     onSettings: () -> Unit,
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
@@ -99,9 +104,12 @@ fun ArtistGalleryScreen(
                 title = { Text(state.artistTag.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") } },
                 actions = {
-                    IconButton(onClick = onSync, enabled = !syncing) {
-                        if (syncing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else Icon(Icons.Rounded.Sync, "同步作品")
+                    IconButton(onClick = if (syncing) onPause else onSync, enabled = syncState != SyncState.PAUSING) {
+                        Icon(when (syncState) {
+                            SyncState.SYNCING, SyncState.PAUSING -> Icons.Rounded.Pause
+                            SyncState.PAUSED -> Icons.Rounded.PlayArrow
+                            else -> Icons.Rounded.Sync
+                        }, if (syncing) "暂停同步" else if (syncState == SyncState.PAUSED) "继续同步" else "同步作品")
                     }
                     IconButton(onSettings) { Icon(Icons.Rounded.Settings, "设置与网页验证") }
                 },

@@ -1,6 +1,9 @@
 package com.homura251.rule34downloader.ui
 
 import android.content.Intent
+import android.provider.DocumentsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +27,9 @@ fun DownloaderApp(
     val showSettings by viewModel.showSettings.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val previousStates = remember { mutableStateMapOf<String, SyncState>() }
+    val downloadsPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) viewModel.linkDownloadsFolder(uri)
+    }
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
@@ -50,9 +56,11 @@ fun DownloaderApp(
         ArtistGalleryScreen(
             state = gallery,
             syncing = artists.any { it.tag == galleryArtist && it.syncState == SyncState.SYNCING },
+            syncState = artists.firstOrNull { it.tag == galleryArtist }?.syncState ?: SyncState.IDLE,
             snackbarHostState = snackbarHostState,
             onBack = viewModel::closeGallery,
             onSync = { viewModel.syncArtist(galleryArtist) },
+            onPause = { viewModel.pauseArtist(galleryArtist) },
             onSettings = viewModel::openSettings,
             onLoadMore = viewModel::loadMoreGallery,
             onRetry = viewModel::retryGallery,
@@ -64,6 +72,7 @@ fun DownloaderApp(
         onSettings = viewModel::openSettings,
         onAdd = viewModel::openAddAuthor,
         onSync = viewModel::syncArtist,
+        onPause = viewModel::pauseArtist,
         onRemove = viewModel::removeArtist,
         onBrowse = viewModel::openGallery,
     )
@@ -84,6 +93,10 @@ fun DownloaderApp(
             initial = settings,
             onDismiss = viewModel::closeSettings,
             onVerifyWeb = { context.startActivity(Intent(context, WebVerificationActivity::class.java)) },
+            onLinkDownloads = {
+                downloadsPicker.launch(viewModel.downloadsFolderUri() ?: DocumentsContract.buildDocumentUri(
+                    "com.android.externalstorage.documents", "primary:Download/Rule34 Downloader"))
+            },
             onSave = { draft ->
                 if (draft.autoSyncEnabled) onRequestNotificationPermission()
                 viewModel.saveSettings(draft)

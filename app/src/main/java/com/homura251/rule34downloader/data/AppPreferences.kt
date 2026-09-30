@@ -17,6 +17,10 @@ class AppPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_WIFI_ONLY, false)
         set(value) = prefs.edit().putBoolean(KEY_WIFI_ONLY, value).apply()
 
+    var existingDownloadsTreeUri: String?
+        get() = prefs.getString("existing_downloads_tree_uri", null)
+        set(value) = prefs.edit().putString("existing_downloads_tree_uri", value).apply()
+
     companion object {
         const val DEFAULT_INTERVAL_MINUTES = 360L
 

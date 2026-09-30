@@ -11,12 +11,16 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.homura251.rule34downloader.data.AppPreferences
+import com.homura251.rule34downloader.data.Rule34Database
 import java.util.concurrent.TimeUnit
 
 object SyncScheduler {
     private const val PERIODIC_SYNC_NAME = "rule34-periodic-discovery"
 
-    fun enqueueArtistSync(context: Context, artistTag: String) {
+    fun enqueueArtistSync(context: Context, artistTag: String, resume: Boolean = false) {
+        val database = Rule34Database.getInstance(context)
+        if (resume && !database.resumeSync(artistTag)) return
+        if (database.isPaused(artistTag)) return
         val preferences = AppPreferences(context)
         val request = OneTimeWorkRequestBuilder<ArtistSyncWorker>()
             .setInputData(workDataOf(ArtistSyncWorker.KEY_ARTIST_TAG to artistTag))
@@ -26,13 +30,20 @@ object SyncScheduler {
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             artistWorkName(artistTag),
-            ExistingWorkPolicy.KEEP,
+            if (resume) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
             request,
         )
     }
 
     fun cancelArtistSync(context: Context, artistTag: String) {
+        SyncControls.pause(artistTag)
         WorkManager.getInstance(context).cancelUniqueWork(artistWorkName(artistTag))
+    }
+
+    fun pauseArtistSync(context: Context, artistTag: String) {
+        val database = Rule34Database.getInstance(context)
+        database.requestPause(artistTag)
+        if (!SyncControls.pause(artistTag)) database.finishPaused(artistTag)
     }
 
     fun ensurePeriodicSchedule(context: Context) {

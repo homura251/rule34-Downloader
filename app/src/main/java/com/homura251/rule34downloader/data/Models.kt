@@ -5,6 +5,8 @@ import java.net.URI
 enum class SyncState {
     IDLE,
     SYNCING,
+    PAUSING,
+    PAUSED,
     COMPLETE,
     ERROR,
 }
@@ -41,6 +43,7 @@ data class ArtistRecord(
     val tag: String,
     val sourcePostId: Long,
     val lastSeenPostId: Long,
+    val paused: Boolean = false,
 )
 
 data class ArtistSummary(

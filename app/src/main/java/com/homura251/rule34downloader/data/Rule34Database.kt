@@ -29,6 +29,7 @@ class Rule34Database private constructor(context: Context) :
                 source_post_id INTEGER NOT NULL,
                 last_seen_post_id INTEGER NOT NULL DEFAULT 0,
                 sync_state TEXT NOT NULL DEFAULT 'IDLE',
+                sync_paused INTEGER NOT NULL DEFAULT 0,
                 current_post_id INTEGER,
                 last_error TEXT,
                 last_sync_at INTEGER,
@@ -60,6 +61,7 @@ class Rule34Database private constructor(context: Context) :
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL("ALTER TABLE downloads ADD COLUMN preview_url TEXT")
+        if (oldVersion < 3) db.execSQL("ALTER TABLE artists ADD COLUMN sync_paused INTEGER NOT NULL DEFAULT 0")
     }
 
     fun observeArtistSummaries(): Flow<List<ArtistSummary>> =
@@ -128,7 +130,7 @@ class Rule34Database private constructor(context: Context) :
     ).use { it.moveToFirst() }
 
     fun getArtist(tag: String): ArtistRecord? = readableDatabase.rawQuery(
-        "SELECT tag, source_post_id, last_seen_post_id FROM artists WHERE tag = ? LIMIT 1",
+        "SELECT tag, source_post_id, last_seen_post_id, sync_paused FROM artists WHERE tag = ? LIMIT 1",
         arrayOf(tag),
     ).use { cursor ->
         if (!cursor.moveToFirst()) return@use null
@@ -136,6 +138,7 @@ class Rule34Database private constructor(context: Context) :
             tag = cursor.getString(0),
             sourcePostId = cursor.getLong(1),
             lastSeenPostId = cursor.getLong(2),
+            paused = cursor.getInt(3) != 0,
         )
     }
 
@@ -155,14 +158,44 @@ class Rule34Database private constructor(context: Context) :
         currentPostId: Long? = null,
         error: String? = null,
         markSyncTime: Boolean = false,
-    ) {
+    ): Boolean {
         val values = ContentValues().apply {
             put("sync_state", state.name)
             if (currentPostId == null) putNull("current_post_id") else put("current_post_id", currentPostId)
             if (error == null) putNull("last_error") else put("last_error", error.take(500))
             if (markSyncTime) put("last_sync_at", System.currentTimeMillis())
         }
-        writableDatabase.update("artists", values, "tag = ?", arrayOf(tag))
+        val updated = writableDatabase.update("artists", values, "tag = ? AND sync_paused = 0", arrayOf(tag))
+        if (updated > 0) signalChanged()
+        return updated > 0
+    }
+
+    fun isPaused(tag: String): Boolean = getArtist(tag)?.paused == true
+
+    @Synchronized
+    fun requestPause(tag: String) {
+        writableDatabase.execSQL("UPDATE artists SET sync_paused = 1, sync_state = 'PAUSING', last_error = NULL WHERE tag = ?", arrayOf(tag))
+        signalChanged()
+    }
+
+    @Synchronized
+    fun finishPaused(tag: String) {
+        resetInProgress(tag)
+        writableDatabase.execSQL("UPDATE artists SET sync_state = 'PAUSED', current_post_id = NULL WHERE tag = ? AND sync_paused = 1", arrayOf(tag))
+        signalChanged()
+    }
+
+    @Synchronized
+    fun resumeSync(tag: String): Boolean {
+        val values = ContentValues().apply { put("sync_paused", 0); put("sync_state", "IDLE"); putNull("last_error") }
+        val count = writableDatabase.update("artists", values, "tag = ? AND sync_paused = 1 AND sync_state = 'PAUSED'", arrayOf(tag))
+        if (count > 0) signalChanged()
+        return count > 0
+    }
+
+    @Synchronized
+    fun resetInProgress(tag: String) {
+        writableDatabase.execSQL("UPDATE downloads SET status = 'PENDING', bytes_downloaded = 0, error = NULL WHERE artist_tag = ? AND status = 'DOWNLOADING'", arrayOf(tag))
         signalChanged()
     }
 
@@ -275,10 +308,14 @@ class Rule34Database private constructor(context: Context) :
     }
 
     @Synchronized
-    fun markDownloaded(tag: String, postId: Long, localUri: String) {
+    fun markDownloaded(tag: String, postId: Long, localUri: String, bytes: Long? = null) {
         val values = ContentValues().apply {
             put("status", DownloadStatus.DOWNLOADED.name)
             put("local_uri", localUri)
+            if (bytes != null) {
+                put("bytes_downloaded", bytes)
+                put("total_bytes", bytes)
+            }
             putNull("error")
             put("updated_at", System.currentTimeMillis())
         }
@@ -360,7 +397,7 @@ class Rule34Database private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "rule34_downloader.db"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
 
         @Volatile
         private var instance: Rule34Database? = null
