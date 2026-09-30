@@ -115,7 +115,14 @@ class BrowserPageReader(
                     override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
                         if (request.isForMainFrame) {
                             httpError = errorResponse.statusCode
-                            if (httpError !in listOf(403, 429, 503)) fail(ApiException("匿名网页请求失败（HTTP $httpError）。"))
+                            val challenge = errorResponse.responseHeaders.orEmpty().any { (key, value) ->
+                                key.equals("cf-mitigated", true) && value.equals("challenge", true)
+                            }
+                            // Chromium may replace 429 with an internal error page
+                            // whose DOM cannot be inspected. Handle its status here.
+                            if (httpError == 429 && !challenge) fail(RetryableApiException("匿名网页暂时不可用（HTTP 429），请稍后重试。"))
+                            else if (httpError >= 500 && httpError != 503 && !challenge) fail(RetryableApiException("匿名网页暂时不可用（HTTP $httpError），请稍后重试。"))
+                            else if (httpError !in listOf(403, 429, 503) && !challenge) fail(ApiException("匿名网页请求失败（HTTP $httpError）。"))
                         }
                     }
                 }
