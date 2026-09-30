@@ -1,11 +1,13 @@
 package com.homura251.rule34downloader.ui
 
+import android.content.Intent
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.homura251.rule34downloader.data.SyncState
 
@@ -14,6 +16,7 @@ fun DownloaderApp(
     viewModel: MainViewModel,
     onRequestNotificationPermission: () -> Unit,
 ) {
+    val context = LocalContext.current
     val artists by viewModel.artists.collectAsStateWithLifecycle()
     val addState by viewModel.addAuthorState.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -66,6 +69,7 @@ fun DownloaderApp(
         SettingsDialog(
             initial = settings,
             onDismiss = viewModel::closeSettings,
+            onVerifyWeb = { context.startActivity(Intent(context, WebVerificationActivity::class.java)) },
             onSave = { draft ->
                 if (draft.autoSyncEnabled) onRequestNotificationPermission()
                 viewModel.saveSettings(draft)

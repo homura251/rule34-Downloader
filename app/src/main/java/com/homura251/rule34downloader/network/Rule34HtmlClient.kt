@@ -5,11 +5,14 @@ import com.homura251.rule34downloader.data.Rule34Tag
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.IOException
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 
-class Rule34HtmlClient {
+class Rule34HtmlClient(private val httpClient: OkHttpClient) {
     data class ResolvedPost(
         val post: Rule34Post,
         val artists: List<Rule34Tag>,
@@ -47,47 +50,41 @@ class Rule34HtmlClient {
     private fun fetchDocument(url: String): Document {
         var lastStatus = 0
         repeat(MAX_REQUEST_ATTEMPTS) { attempt ->
-            val response = try {
-                Jsoup.connect(url)
-                    .userAgent(USER_AGENT)
+            try {
+                val request = Request.Builder().url(url)
                     .header("Accept", "text/html,application/xhtml+xml")
-                    .timeout(READ_TIMEOUT_MS)
-                    .followRedirects(true)
-                    .ignoreHttpErrors(true)
-                    .execute()
-            } catch (e: Exception) {
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    lastStatus = response.code
+                    if (lastStatus == 429 || lastStatus >= 500) {
+                        if (attempt == MAX_REQUEST_ATTEMPTS - 1) {
+                            throw RetryableApiException("Rule34 匿名网页暂时不可用（HTTP $lastStatus）。")
+                        }
+                    } else {
+                        if (!response.isSuccessful) {
+                            throw ApiException("Rule34 匿名网页请求失败（HTTP $lastStatus）。")
+                        }
+                        val body = response.body?.string()
+                            ?: throw RetryableApiException("Rule34 匿名网页返回了空响应。")
+                        val document = Jsoup.parse(body, response.request.url.toString())
+                        if (looksLikeChallenge(document)) {
+                            throw HtmlChallengeException(CloudflareChallengeException().message.orEmpty())
+                        }
+                        return document
+                    }
+                }
+            } catch (e: CloudflareChallengeException) {
+                throw HtmlChallengeException(e.message.orEmpty(), e)
+            } catch (e: IOException) {
+                if (Thread.currentThread().isInterrupted) throw e
                 if (attempt == MAX_REQUEST_ATTEMPTS - 1) {
                     throw RetryableApiException(
                         "匿名网页请求失败：${e.message ?: "网络错误"}",
                         e,
                     )
                 }
-                Thread.sleep(RETRY_DELAY_MS * (attempt + 1))
-                return@repeat
             }
-
-            lastStatus = response.statusCode()
-            val document = response.parse()
-
-            if (looksLikeChallenge(document)) {
-                throw HtmlChallengeException(
-                    "匿名网页访问被 Cloudflare/验证码拦截。可稍后重试，或在设置中配置 API 凭据。",
-                )
-            }
-
-            if (lastStatus == 429 || lastStatus >= 500) {
-                if (attempt == MAX_REQUEST_ATTEMPTS - 1) {
-                    throw RetryableApiException("Rule34 匿名网页暂时不可用（HTTP $lastStatus）。")
-                }
-                Thread.sleep(RETRY_DELAY_MS * (attempt + 1))
-                return@repeat
-            }
-
-            if (lastStatus !in 200..299) {
-                throw ApiException("Rule34 匿名网页请求失败（HTTP $lastStatus）。")
-            }
-
-            return document
+            Thread.sleep(RETRY_DELAY_MS * (attempt + 1))
         }
         throw RetryableApiException("Rule34 匿名网页暂时不可用（HTTP $lastStatus）。")
     }
@@ -196,16 +193,12 @@ class Rule34HtmlClient {
     }
 
     private fun looksLikeChallenge(document: Document): Boolean {
-        val title = document.title()
-        val body = document.body()?.text().orEmpty()
+        val title = document.title().trim()
         val html = document.html()
-        return title.contains("Just a moment", ignoreCase = true) ||
-            title.contains("CAPTCHA", ignoreCase = true) ||
-            body.contains("429 Rate limiting", ignoreCase = true) ||
-            body.contains("Checking your browser", ignoreCase = true) ||
-            body.contains("Enable JavaScript and cookies", ignoreCase = true) ||
-            html.contains("challenge-platform", ignoreCase = true) ||
-            html.contains("_cf_chl_opt", ignoreCase = true)
+        return title.startsWith("Just a moment", ignoreCase = true) ||
+            title.equals("CAPTCHA", ignoreCase = true) ||
+            html.contains("_cf_chl_opt", ignoreCase = true) ||
+            document.selectFirst("#challenge-form, #cf-challenge-running") != null
     }
 
     private fun postUrl(postId: Long): String =
@@ -218,12 +211,9 @@ class Rule34HtmlClient {
         const val POSTS_PER_PAGE = 42
 
         private const val SITE = "https://rule34.xxx"
-        private const val READ_TIMEOUT_MS = 60_000
         private const val MAX_REQUEST_ATTEMPTS = 3
         private const val RETRY_DELAY_MS = 5_000L
         private const val DETAIL_REQUEST_DELAY_MS = 750L
-        private const val USER_AGENT =
-            "rule34-Downloader/1.1 (+https://github.com/homura251/rule34-Downloader)"
 
         internal fun parsePostIdsFromHtml(html: String): List<Long> {
             val document = Jsoup.parse(html, SITE)
@@ -256,4 +246,4 @@ class Rule34HtmlClient {
     }
 }
 
-class HtmlChallengeException(message: String) : ApiException(message)
+class HtmlChallengeException(message: String, cause: Throwable? = null) : ApiException(message, cause)
