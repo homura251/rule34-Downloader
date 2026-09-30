@@ -1,0 +1,119 @@
+name: Signed Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a GitHub Release (otherwise upload an Actions artifact only)
+        type: boolean
+        required: true
+        default: true
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  signed-release:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Restore signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          names = ('ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD')
+          missing = [name for name in names if not os.environ.get(name, '').strip()]
+          if missing:
+              raise SystemExit('Missing repository Actions secrets: ' + ', '.join(missing))
+          try:
+              data = base64.b64decode(''.join(os.environ['ANDROID_KEYSTORE_BASE64'].split()), validate=True)
+          except ValueError:
+              raise SystemExit('ANDROID_KEYSTORE_BASE64 must contain the Base64-encoded keystore') from None
+          if not data:
+              raise SystemExit('The signing keystore is empty')
+          path = Path(os.environ['RUNNER_TEMP']) / 'rule34-release.jks'
+          path.touch(mode=0o600)
+          path.write_bytes(data)
+          PY
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+      - name: Unit tests and signed release build
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/rule34-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --stacktrace --no-configuration-cache testDebugUnitTest assembleRelease
+      - name: Verify APK signature
+        run: |
+          apksigner="$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)"
+          "$apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+      - name: Prepare versioned release APK
+        id: release
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import shutil
+          from pathlib import Path
+
+          version = re.search(r'versionName\s*=\s*"([^"]+)"', Path('app/build.gradle.kts').read_text()).group(1)
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9]+)*', version):
+              raise SystemExit('Invalid versionName')
+          apk = f'rule34-Downloader-v{version}-release.apk'
+          shutil.copyfile('app/build/outputs/apk/release/app-release.apk', apk)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\ntag=v{version}\napk={apk}\n')
+          PY
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rule34-Downloader-v${{ steps.release.outputs.version }}-release
+          path: ${{ steps.release.outputs.apk }}
+          if-no-files-found: error
+      - name: Publish signed GitHub Release
+        if: github.event_name == 'push' || inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_APK: ${{ steps.release.outputs.apk }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::Release $RELEASE_TAG already exists. Increase versionName/versionCode, or run with publish_release disabled."
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" "$RELEASE_APK" \
+            --target "$GITHUB_SHA" \
+            --title "rule34-Downloader v$RELEASE_VERSION" \
+            --generate-notes
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/rule34-release.jks"
