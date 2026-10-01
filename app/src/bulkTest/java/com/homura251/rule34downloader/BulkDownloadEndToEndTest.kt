@@ -236,6 +236,18 @@ class BulkDownloadEndToEndTest {
         context.contentResolver.persistedUriPermissions.forEach {
             context.contentResolver.releasePersistableUriPermission(it.uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        // The picker also grants temporary access to the receiving activity.
+        // Finish its task before testing effective revocation, not just removal
+        // from persistedUriPermissions.
+        val revokedTree = Uri.parse(AppPreferences(context).existingDownloadsTreeUri!!)
+        scenario?.close()
+        scenario = null
+        wait {
+            context.checkUriPermission(revokedTree, android.os.Process.myPid(), android.os.Process.myUid(),
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) == android.content.pm.PackageManager.PERMISSION_DENIED
+        }
+        assertTrue(context.contentResolver.persistedUriPermissions.isEmpty())
+        scenario = ActivityScenario.launch(MainActivity::class.java)
         resumeFromUi()
         wait { database.getSyncState(tag) == SyncState.ERROR && tag !in SyncControls.activeTags() }
         assertEquals(0, origin.totalOriginals())
