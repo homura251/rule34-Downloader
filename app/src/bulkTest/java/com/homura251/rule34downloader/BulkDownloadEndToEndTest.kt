@@ -72,7 +72,7 @@ class BulkDownloadEndToEndTest {
         DownloaderWorkerFactory.setServicesForTests(null)
         scenario?.close()
         origin.close()
-        if (successful && phase in setOf("browser", "restore", "recover")) {
+        if (successful && phase in setOf("browser", "recover")) {
             if (phase in setOf("browser", "recover")) deleteOwnedFiles()
             database.removeArtist(tag)
         }

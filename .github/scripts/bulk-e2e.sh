@@ -68,14 +68,10 @@ run_phase checkpoint 3000
 # A paused batch must stay paused after the application process is stopped.
 adb shell am force-stop "$app_package"
 adb shell am start -W -n "$app_package/.MainActivity"
-android --no-metrics --sdk="$ANDROID_HOME" layout --full --output=app/build/bulk-e2e-evidence/paused-after-force-stop.json
-android --no-metrics --sdk="$ANDROID_HOME" screen capture --output=app/build/bulk-e2e-evidence/paused-after-force-stop.png
-python3 - <<'PY'
-import json
-from pathlib import Path
-layout=json.loads(Path('app/build/bulk-e2e-evidence/paused-after-force-stop.json').read_text())
-assert '已暂停' in json.dumps(layout,ensure_ascii=False), 'Paused state did not survive process restart'
-PY
+adb exec-out screencap -p > app/build/bulk-e2e-evidence/paused-after-force-stop.png
+# The resume instrumentation asserts the persisted PAUSED state and the two
+# completed URIs after this real process restart. Android CLI accessibility
+# sessions run after the last instrumentation to avoid simultaneous registration.
 run_phase resume 3000
 
 # A real package uninstall clears the database, UID ownership and SAF grants.
@@ -95,5 +91,15 @@ PY
 android --no-metrics --sdk="$ANDROID_HOME" install --apks="$app_apk" --install-options=-g
 adb install -r "$test_apk"
 run_phase restore 3000
+adb shell am start -W -n "$app_package/.MainActivity"
+android --no-metrics --sdk="$ANDROID_HOME" layout --full --output=app/build/bulk-e2e-evidence/complete-after-reinstall.json
+android --no-metrics --sdk="$ANDROID_HOME" screen capture --output=app/build/bulk-e2e-evidence/complete-after-reinstall.png
+python3 - <<'PY_CHECK'
+import json
+from pathlib import Path
+layout=json.loads(Path('app/build/bulk-e2e-evidence/complete-after-reinstall.json').read_text())
+text=json.dumps(layout,ensure_ascii=False)
+assert '3000' in text or '3,000' in text, 'Completed 3000-file batch missing from actual app UI'
+PY_CHECK
 collect
 printf 'PASS: actual process death; Chromium UI pause/resume; 3000 verified files; real uninstall and SAF reuse\n' > app/build/bulk-e2e-evidence/result.txt
