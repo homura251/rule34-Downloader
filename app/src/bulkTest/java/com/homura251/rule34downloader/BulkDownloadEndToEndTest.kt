@@ -307,7 +307,11 @@ class BulkDownloadEndToEndTest {
         val use = device.wait(Until.findObject(By.text(Pattern.compile("(?i)use this folder"))), 10_000) ?: error("No folder confirmation")
         assertTrue(use.isEnabled); use.click()
         device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)?.click() ?: error("No SAF grant confirmation")
-        wait { AppPreferences(context).existingDownloadsTreeUri != null && context.contentResolver.persistedUriPermissions.any { it.isReadPermission } }
+        wait {
+            val value = AppPreferences(context).existingDownloadsTreeUri
+            value != null && (!child || DocumentsContract.getTreeDocumentId(Uri.parse(value)).endsWith("/" + tag)) &&
+                context.contentResolver.persistedUriPermissions.any { it.isReadPermission && it.uri == Uri.parse(value) }
+        }
         if (child) assertTrue(DocumentsContract.getTreeDocumentId(Uri.parse(AppPreferences(context).existingDownloadsTreeUri!!)).endsWith("/" + tag))
         waitUiText("下载与同步设置"); ui.onNodeWithText("取消").performClick()
         capture(phase + "-folder-granted.png")
