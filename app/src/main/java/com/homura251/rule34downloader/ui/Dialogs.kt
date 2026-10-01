@@ -41,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -68,7 +69,7 @@ fun AddAuthorDialog(
                 OutlinedTextField(
                     value = state.input,
                     onValueChange = onInputChange,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("author-input"),
                     label = { Text("artist tag / 帖子或图集链接 / Post ID") },
                     placeholder = { Text("savvyraexo") },
                     enabled = !state.resolving,

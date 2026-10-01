@@ -239,6 +239,10 @@ class Rule34Database private constructor(context: Context) :
 
     fun isPaused(tag: String): Boolean = getArtist(tag)?.paused == true
 
+    fun getSyncState(tag: String): SyncState? = readableDatabase.rawQuery(
+        "SELECT sync_state FROM artists WHERE tag = ?", arrayOf(tag),
+    ).use { if (it.moveToFirst()) SyncState.valueOf(it.getString(0)) else null }
+
     @Synchronized
     fun requestPause(tag: String) {
         writableDatabase.execSQL("UPDATE artists SET sync_paused = 1, sync_state = 'PAUSING', last_error = NULL WHERE tag = ?", arrayOf(tag))
