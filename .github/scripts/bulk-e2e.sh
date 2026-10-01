@@ -11,6 +11,8 @@ test_apk=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 collect() {
   adb pull "/sdcard/Download/Rule34 Downloader Test Evidence/bulk-$bulk_key/" app/build/bulk-e2e-evidence/ || true
   adb shell dumpsys webviewupdate > app/build/bulk-e2e-evidence/webview-provider.txt || true
+  adb shell dumpsys connectivity > app/build/bulk-e2e-evidence/connectivity.txt || true
+  adb shell dumpsys jobscheduler > app/build/bulk-e2e-evidence/jobscheduler.txt || true
   adb logcat -d -t 4000 > app/build/bulk-e2e-evidence/logcat.txt || true
 }
 trap collect EXIT

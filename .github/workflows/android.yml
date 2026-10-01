@@ -80,6 +80,7 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8,1.1.1.1
           script: bash .github/scripts/controlled-e2e.sh
       - name: Upload Android test reports
         if: always()
@@ -130,6 +131,7 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8,1.1.1.1
           script: bash .github/scripts/live-origin-test.sh
       - name: Upload live origin result, including failures
         if: always()
@@ -173,6 +175,7 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8,1.1.1.1
           script: bash .github/scripts/bulk-e2e.sh
       - name: Upload complete bulk test evidence
         if: always()
