@@ -14,7 +14,7 @@
 - **API 凭据可选**：
   - 已配置 User ID + API Key：优先使用 DAPI，速度更快、批量同步更稳定
   - 未配置：自动使用公开网页匿名解析，仍可发现帖子并取得 “Original image” 原文件链接
-- 首次同步下载该作者全部作品；后续保存最高 post ID，只补充新增帖子。
+- 首次同步逐页发现该作者作品，每读到一条元数据就保存并下载；继续时先处理已保存的未完成队列，再补扫尚未读完的页面。仅在完整扫描成功后保存最高 post ID，后续只补充新增帖子。
 - 每位作者独立保存到 `Download/Rule34 Downloader/<artist>/`。
 - **Pool 图集**：跨页发现全部成员，保存到 `Download/Rule34 Downloader/pool_<ID>/`，相册和滑动预览按原站图集顺序展示。后续重新检查成员和顺序，只给未记录的帖子补取元数据，不会因帖子 ID 较旧而漏掉后来加入的图片。
 - 同步支持暂停/继续；暂停状态持久保存，自动同步跳过暂停的画师。已完成的文件保留，正在传输的文件在继续后重新下载。
@@ -62,16 +62,16 @@
 
 - 新下载必须非空、匹配声明长度（若可用）并通过原文件 MD5；关闭输出后重新读取保存的文件校验，全部通过才公开 MediaStore 文件并标记已下载。
 - MD5 可以来自帖子元数据或原文件 URL 的精确 32 位哈希文件名。没有可靠哈希的文件会报告错误，不能凭非空内容认定完成或复用。
-- 升级到 1.5.0 后，旧完成记录会重新待校验，保留文件和 URI；下一次同步通过校验后恢复完成。已经验证的记录每次同步检查可读性与长度，失效 URI 会重新关联或下载。
+- 升级到 1.5.0 后，旧完成记录会重新待校验，保留文件和 URI；下一次同步通过校验后恢复完成。已经验证的记录每次同步读回并检查长度和 MD5；即使损坏后长度未变，也会重新关联或下载。
 - 暂停中止网络请求和 WebView 流式传输，未完成的新文件被删除；继续会重新下载该文件。完成的旧文件保留。
 - 同一画师/图集的任务串行执行，包括取消后的清理。下次同步清理该目录中本应用所有的未公开 MediaStore 文件，处理进程被杀留下的临时文件。
-- 更换旧目录会刷新扫描索引并重启正在同步的任务。保留旧目录的只读授权，以免破坏仍引用旧 URI 的本地预览；已经暂停的任务保持暂停。
+- 更换旧目录会刷新扫描索引并重启正在同步或等待重试的任务。保留旧目录的只读授权，以免破坏仍引用旧 URI 的本地预览；已经暂停的任务保持暂停。
 
 ## 匿名模式与 API 模式
 
 Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时不会调用需要认证的 DAPI，而是解析公开网页：
 
-1. 作者搜索页读取每页 Post ID（当前网页每页 42 项）。
+1. 作者搜索页读取每页 Post ID（当前网页每页 42 项），按 ID 游标向前翻页，避免大批量偏移上限以及新帖子挤动分页导致漏图；列表未遵守游标时报告错误。
 2. 逐条读取帖子详情页。
 3. 从详情页 Options 的 “Original image” 获取原文件 URL，兼容没有 `.link-list` 的旧布局、嵌套文本和相对地址；也可读取帖子原图或视频 source。拒绝 sample、缩略图、视频封面、评论中的链接和站外地址。
 4. 从 `#tag-sidebar .tag-type-artist` 识别帖子中的 artist tag。
@@ -116,9 +116,9 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 
 调试 APK：`app/build/outputs/apk/debug/app-debug.apk`。
 
-推送到 `main` 且提交信息包含 `[release-debug]` 时，构建与必需的 Android 回归测试全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.3`，附件为 `rule34-Downloader-v1.5.3-debug.apk`。其他版本的 Release 保留。
+推送到 `main` 且提交信息包含 `[release-debug]` 时，构建与必需的 Android 回归测试全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.4`，附件为 `rule34-Downloader-v1.5.4-debug.apk`。其他版本的 Release 保留。
 
-普通 main 提交和 PR 会运行 JVM 单元测试及 Android 35 上的真实 WebView、流式传输、暂停、MediaStore 和数据库升级回归测试，构建并上传调试 APK artifact，并使用临时测试密钥验证 Release 构建与签名；临时密钥签出的 Release APK 不会上传或发布。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
+普通 main 提交和 PR 会运行 JVM 单元测试及 Android 35 上的真实 WebView、流式传输、暂停、MediaStore、数据库升级和批量端到端回归测试，构建并上传调试 APK artifact，并使用临时测试密钥验证 Release 构建与签名；临时密钥签出的 Release APK 不会上传或发布。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
 
 ### Android CLI 与端到端测试
 
@@ -129,6 +129,8 @@ CI 安装 Google 官方 Android CLI，在 Android 35 模拟器上安装并启动
 1.5.3 为主页添加按钮和 Snackbar 使用独立的底部布局区域，避免小屏幕上遮挡画师卡片的暂停、继续与同步按钮。
 
 - `android-regression-results`：Android 回归测试报告，以及 Android CLI 的屏幕截图、布局和 WebView 版本。
+- `bulk-e2e-results`：真实 UI / WorkManager / HTTP / MediaStore 的 3,000 文件批量测试。覆盖元数据请求中与原文件传输中暂停、继续后的旧 URI 保留、重复同步、同长度损坏修复、真实进程被杀后的未公开文件清理，以及真实卸载重装后经系统 SAF 授权复用旧文件、切换目录、撤销和重新授权。测试文件来自本机 HTTP 服务；这不等于已下载原站画师的全部原文件。
+- `bulk-e2e-apks`：同一次构建的批量测试 App 与 instrumentation APK；批量源仅由 Debug instrumentation 注入，普通安装无测试入口，Release 使用正式网络服务。
 - `e2e-apks`：同一次构建、签名匹配的 App APK 与 instrumentation APK，可安装到设备重跑。
 - `live-origin-results`：独立使用真实匿名网络请求反馈中的帖子 `18905312`，只有成功解析并下载、读回校验和发布后才算通过。Cloudflare、网络或页面解析失败会保留失败测试与诊断；该外部检查允许失败，不阻止受控回归测试和构建，但不能据此宣称匿名原站下载成功。
 

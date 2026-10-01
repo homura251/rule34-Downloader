@@ -70,8 +70,8 @@ internal class BulkOrigin(val tag: String, val count: Int, checkpoint: Boolean) 
                 return MockResponse().setResponseCode(404)
             }
         }
-        server.start()
-        endpoint = server.url("/") // Resolve DNS on the instrumentation thread.
+        server.start(java.net.InetAddress.getByAddress("127.0.0.1", byteArrayOf(127, 0, 0, 1)), 0)
+        endpoint = HttpUrl.Builder().scheme("http").host("127.0.0.1").port(server.port).build()
         client = OkHttpClient.Builder().readTimeout(60, TimeUnit.SECONDS).addInterceptor { chain ->
             val original = chain.request().url
             val target = original.newBuilder().scheme(endpoint.scheme).host(endpoint.host).port(endpoint.port).build()

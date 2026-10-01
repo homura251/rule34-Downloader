@@ -102,7 +102,7 @@ jobs:
           if-no-files-found: warn
   live-origin-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     # Live Cloudflare policy is external; keep its failure visible without replacing controlled regressions.
     continue-on-error: true
     steps:
