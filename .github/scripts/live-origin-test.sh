@@ -20,6 +20,7 @@ adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 run_class() {
   local name="$1"
   local expected="$2"
+  bash .github/scripts/prepare-emulator.sh app/build/live-e2e-evidence
   adb shell am instrument -w -r -e class "$app_package.$name" \
     "$app_package.test/androidx.test.runner.AndroidJUnitRunner" \
     | tee "app/build/live-e2e-evidence/$name.log"

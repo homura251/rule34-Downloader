@@ -24,6 +24,7 @@ adb install -r "$test_apk"
 run_phase() {
   local phase="$1"
   local count="$2"
+  bash .github/scripts/prepare-emulator.sh app/build/bulk-e2e-evidence
   adb shell am instrument -w -r \
     -e class "$app_package.BulkDownloadEndToEndTest" \
     -e bulkPhase "$phase" -e bulkCount "$count" -e bulkKey "$bulk_key" \
@@ -40,6 +41,7 @@ PY
 
 # True process death while an original is partly written. The expected killed
 # instrumentation is validated by a separate, successful recovery phase.
+bash .github/scripts/prepare-emulator.sh app/build/bulk-e2e-evidence
 adb shell am instrument -w -r \
   -e class "$app_package.BulkDownloadEndToEndTest" \
   -e bulkPhase crash -e bulkCount 84 -e bulkKey "$bulk_key" \

@@ -3,6 +3,8 @@ set -euo pipefail
 
 mkdir -p app/build/e2e-evidence
 status=0
+./gradlew --stacktrace assembleDebug assembleDebugAndroidTest
+bash .github/scripts/prepare-emulator.sh app/build/e2e-evidence
 ./gradlew --stacktrace connectedDebugAndroidTest || status=$?
 adb shell dumpsys webviewupdate > app/build/e2e-evidence/webview-provider.txt
 adb pull "/sdcard/Download/Rule34 Downloader Test Evidence/controlled/" app/build/e2e-evidence/ || true
