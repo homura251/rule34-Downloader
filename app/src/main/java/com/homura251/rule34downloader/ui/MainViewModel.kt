@@ -11,6 +11,7 @@ import com.homura251.rule34downloader.data.CredentialsStore
 import com.homura251.rule34downloader.data.Rule34Database
 import com.homura251.rule34downloader.data.Rule34Tag
 import com.homura251.rule34downloader.data.GalleryPost
+import com.homura251.rule34downloader.data.SyncState
 import com.homura251.rule34downloader.network.PostUrlParser
 import com.homura251.rule34downloader.network.Rule34Client
 import com.homura251.rule34downloader.network.Rule34Network
@@ -235,7 +236,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun syncArtist(tag: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            SyncScheduler.enqueueArtistSync(getApplication(), tag, resume = database.isPaused(tag))
+            SyncScheduler.enqueueArtistSync(getApplication(), tag, resume = database.isPaused(tag),
+                replace = database.getSyncState(tag) == SyncState.ERROR)
         }
     }
 

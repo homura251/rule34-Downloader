@@ -82,12 +82,11 @@ class ExistingDownloads(private val context: Context, private val artistTag: Str
             val uri = Uri.parse(value)
             val bytes = try {
                 checkActive()
-                val size = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
-                if (record.status == com.homura251.rule34downloader.data.DownloadStatus.DOWNLOADED &&
-                    record.verifiedMd5 == expected && record.bytesDownloaded > 0 && size == record.bytesDownloaded) {
-                    resolver.openInputStream(uri)?.use { if (it.read() >= 0) size else null }
-                } else resolver.openInputStream(uri)?.use { SavedFileIdentity.verify(it, expected, checkActive) }
+                // A file can be changed without changing its length. Recheck the
+                // stored bytes on every synchronization, including verified URIs.
+                resolver.openInputStream(uri)?.use { SavedFileIdentity.verify(it, expected, checkActive) }
             } catch (_: SecurityException) { null } catch (_: IOException) { null }
+            checkActive()
             if (bytes != null) return Match(uri, bytes, expected)
         }
         for (file in files[record.postId].orEmpty()) {
@@ -96,6 +95,7 @@ class ExistingDownloads(private val context: Context, private val artistTag: Str
             val bytes = try {
                 resolver.openInputStream(file.uri)?.use { SavedFileIdentity.verify(it, expected, checkActive) }
             } catch (_: SecurityException) { null } catch (_: IOException) { null }
+            checkActive()
             if (bytes != null) return Match(file.uri, bytes, expected)
         }
         return null

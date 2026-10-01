@@ -36,8 +36,14 @@ object SyncScheduler {
     }
 
     fun restartAfterFolderChange(context: Context) {
-        for (tag in SyncControls.activeTags()) {
-            if (Rule34Database.getInstance(context).isPaused(tag)) continue
+        val database = Rule34Database.getInstance(context)
+        val manager = WorkManager.getInstance(context)
+        val active = SyncControls.activeTags().toSet()
+        for (tag in database.getArtistTags()) {
+            if (database.isPaused(tag)) continue
+            // Backoff/constraint-waiting work has no registered SyncControl yet.
+            if (tag !in active && manager.getWorkInfosForUniqueWork(artistWorkName(tag))
+                    .get(10, TimeUnit.SECONDS).none { !it.state.isFinished }) continue
             SyncControls.pause(tag)
             enqueueArtistSync(context, tag, replace = true)
         }

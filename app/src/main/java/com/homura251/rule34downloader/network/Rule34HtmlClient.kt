@@ -22,6 +22,35 @@ class Rule34HtmlClient(
         val artists: List<Rule34Tag>,
     )
 
+    data class SearchPage(val ids: List<Long>, val previews: Map<Long, String>)
+
+    /** ID cursor avoids deep offset limits and shifting pages when new posts arrive. */
+    fun getSearchPage(artistTag: String, afterPostId: Long, beforePostId: Long? = null): SearchPage {
+        val boundary = when {
+            beforePostId != null -> "id:<$beforePostId"
+            afterPostId > 0L -> "id:>$afterPostId"
+            else -> ""
+        }
+        // Rule34 does not reliably combine two instances of the same metatag.
+        // Later pages use only the upper bound; the worker stops at afterPostId.
+        val query = listOf(artistTag, "sort:id:desc", boundary).filter(String::isNotBlank).joinToString(" ")
+        val document = fetchDocument("$SITE/index.php?page=post&s=list&tags=${encode(query)}&pid=0")
+        val ids = parsePostIds(document).sortedDescending()
+        requirePostList(document, ids)
+        if (beforePostId != null && ids.any { it >= beforePostId }) {
+            throw RetryableApiException("匿名列表未遵守分页边界，请稍后重新同步；未将本次扫描标记完成。")
+        }
+        return SearchPage(ids, parseThumbnailUrls(document))
+    }
+
+    private fun requirePostList(document: Document, ids: List<Long>) {
+        if (ids.isEmpty() && document.selectFirst(".image-list") == null &&
+            !document.body().text().contains("Nobody here but us chickens", true) &&
+            !document.body().text().contains("No posts found", true)) {
+            throw RetryableApiException("匿名列表页面没有识别到作品列表，请检查站点页面或稍后重试。")
+        }
+    }
+
     fun getPostWithArtists(postId: Long): ResolvedPost {
         val document = fetchDocument(postUrl(postId))
         return ResolvedPost(
@@ -45,11 +74,7 @@ class Rule34HtmlClient(
             "$SITE/index.php?page=post&s=list&tags=${encode(query)}&pid=$offset",
         )
         val postIds = parsePostIds(document)
-        if (postIds.isEmpty() && document.selectFirst(".image-list") == null &&
-            !document.body().text().contains("Nobody here but us chickens", true) &&
-            !document.body().text().contains("No posts found", true)) {
-            throw RetryableApiException("匿名列表页面没有识别到作品列表，请检查站点页面或稍后重试。")
-        }
+        requirePostList(document, postIds)
         val previews = parseThumbnailUrls(document)
         return postIds.mapIndexed { index, postId ->
             checkActive()

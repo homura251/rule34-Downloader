@@ -62,6 +62,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -108,6 +109,7 @@ fun HomeScreen(
             ) {
                 SnackbarHost(snackbarHostState, modifier = Modifier.padding(bottom = 8.dp))
                 ExtendedFloatingActionButton(
+                    modifier = Modifier.testTag("add-author"),
                     onClick = onAdd,
                     icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
                     text = { Text("添加作者/图集") },
@@ -343,6 +345,7 @@ private fun ArtistCard(
                     Text("移除")
                 }
                 FilledTonalButton(
+                    modifier = Modifier.testTag("sync-${artist.tag}"),
                     onClick = if (artist.syncState == SyncState.SYNCING) onPause else onSync,
                     enabled = artist.syncState != SyncState.PAUSING,
                 ) {

@@ -106,12 +106,14 @@ class Rule34Client(
         afterPostId: Long,
         page: Int,
         limit: Int = MAX_POSTS_PER_PAGE,
+        beforePostId: Long? = null,
     ): List<Rule34Post> {
-        val tagQuery = if (afterPostId > 0L) {
-            "$artistTag id:>$afterPostId"
-        } else {
-            artistTag
+        val boundary = when {
+            beforePostId != null -> "id:<$beforePostId"
+            afterPostId > 0L -> "id:>$afterPostId"
+            else -> ""
         }
+        val tagQuery = listOf(artistTag, "sort:id:desc", boundary).filter(String::isNotBlank).joinToString(" ")
         return requestObjects(
             key = "post",
             params = mapOf(
@@ -123,7 +125,7 @@ class Rule34Client(
                 "limit" to limit.coerceIn(1, MAX_POSTS_PER_PAGE).toString(),
                 "json" to "1",
             ),
-        ).mapNotNull(::parsePost)
+        ).map { parsePost(it) ?: throw RetryableApiException("API 帖子数据不完整，本次扫描未标记完成。") }
     }
 
     private fun requestObjects(key: String, params: Map<String, String>): List<JSONObject> {
