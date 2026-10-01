@@ -106,7 +106,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api-level: [35, 37]
+        api-level: [35, 36]
     # Live Cloudflare policy is external; keep its failure visible without replacing controlled regressions.
     continue-on-error: true
     steps:
