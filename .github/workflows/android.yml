@@ -60,19 +60,27 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
+      - name: Install Android CLI
+        run: |
+          curl --fail --silent --show-error --location \
+            https://dl.google.com/android/cli/latest/linux_x86_64/android-cli \
+            --output "$RUNNER_TEMP/android"
+          chmod +x "$RUNNER_TEMP/android"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/android" --no-metrics --version
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Real WebView and MediaStore regression tests
+      - name: Application UI, WebView and MediaStore end-to-end tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           target: google_apis
           arch: x86_64
           disable-animations: true
-          script: ./gradlew --stacktrace connectedDebugAndroidTest
+          script: bash .github/scripts/controlled-e2e.sh
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -81,6 +89,53 @@ jobs:
           path: |
             app/build/reports/androidTests/connected/
             app/build/outputs/androidTest-results/connected/
+            app/build/e2e-evidence/
+          if-no-files-found: warn
+      - name: Upload matching application and instrumentation APKs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          if-no-files-found: warn
+  live-origin-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Live Cloudflare policy is external; keep its failure visible without replacing controlled regressions.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Actual anonymous origin to verified file
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: bash .github/scripts/live-origin-test.sh
+      - name: Upload live origin result, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-origin-results
+          path: |
+            app/build/reports/androidTests/connected/
+            app/build/outputs/androidTest-results/connected/
+            app/build/live-e2e-evidence/
           if-no-files-found: warn
   publish-debug:
     needs: [build, webview-tests]

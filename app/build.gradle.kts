@@ -22,8 +22,8 @@ android {
         applicationId = "com.homura251.rule34downloader"
         minSdk = 29
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.5.2"
+        versionCode = 9
+        versionName = "1.5.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -54,6 +54,10 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    if (providers.gradleProperty("liveSiteTest").orNull == "true") {
+        sourceSets.getByName("androidTest").java.srcDir("src/liveTest/java")
     }
 
     packaging {
@@ -92,4 +96,8 @@ dependencies {
     androidTestImplementation("androidx.test:core-ktx:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    androidTestImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }

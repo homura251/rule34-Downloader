@@ -2,10 +2,13 @@ package com.homura251.rule34downloader.network
 
 import android.content.Context
 import android.content.MutableContextWrapper
+import android.net.http.SslError
 import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -119,6 +122,7 @@ class BrowserPageReader(
         val latch = CountDownLatch(1)
         val result = AtomicReference<Document?>()
         val diagnostics = BrowserReadDiagnostics(url)
+        val observer = BrowserDocumentObserver(diagnostics)
         val failure = AtomicReference<Exception?>()
         val pollToken = Any()
         var webView: WebView? = null
@@ -138,11 +142,9 @@ class BrowserPageReader(
                 abortActive = { fail(BrowserReadException("网页会话已关闭。")) }
                 fun inspect() {
                     if (done.get()) return
-                    BrowserPagePolicy.snapshot(view) { captured ->
-                        if (done.get()) return@snapshot
-                        captured.onFailure { diagnostics.snapshotError.set("${it.javaClass.simpleName}: ${it.message?.take(160)}") }
+                    observer.inspect(view) captured@ { captured ->
+                        if (done.get()) return@captured
                         captured.onSuccess { page ->
-                            diagnostics.snapshot.set(page)
                             val document = page.document
                             if (allowed(document.baseUri()) && BrowserPagePolicy.matchesRequest(url, document.baseUri()) &&
                                 BrowserPagePolicy.isReadable(document, page.contentType, page.readyState) && done.compareAndSet(false, true)) {
@@ -157,16 +159,29 @@ class BrowserPageReader(
                 }
                 view.webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView, actual: String, favicon: android.graphics.Bitmap?) {
-                        diagnostics.nativeUrl.set(actual); diagnostics.httpError.set(0); diagnostics.challengeHeader.set(false)
-                        diagnostics.snapshot.set(null); diagnostics.snapshotError.set(null)
+                        observer.started(actual)
                     }
-                    override fun onPageFinished(view: WebView, actual: String) { diagnostics.nativeUrl.set(actual); inspect() }
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                        BrowserPagePolicy.blockNavigation(request.url.toString(), request.isForMainFrame, allowed)
+                    override fun onPageCommitVisible(view: WebView, actual: String) { observer.committed(actual); inspect() }
+                    override fun onPageFinished(view: WebView, actual: String) { observer.committed(actual); inspect() }
+                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                        val blocked = BrowserPagePolicy.blockNavigation(request.url.toString(), request.isForMainFrame, allowed)
+                        if (blocked) diagnostics.blockedNavigation.set(request.url.toString())
+                        return blocked
+                    }
                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? = blockedPostMedia(request)
                     override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                        if (request.isForMainFrame && BrowserPagePolicy.matchesRequest(url, request.url.toString())) {
-                            fail(BrowserReadException("网页连接失败（${error.errorCode}）：${error.description}。请求：${BrowserReadDiagnostics.safeUrl(url)}"))
+                        if (request.isForMainFrame && (BrowserPagePolicy.matchesRequest(url, request.url.toString()) || request.url.toString() == diagnostics.nativeUrl.get())) {
+                            val message = "网页连接失败（${error.errorCode}）：${error.description}。请求：${BrowserReadDiagnostics.safeUrl(url)}"
+                            diagnostics.loadError.set(message)
+                            fail(BrowserReadException(message))
+                        }
+                    }
+                    override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                        handler.cancel()
+                        if (BrowserPagePolicy.matchesRequest(url, error.url) || error.url == diagnostics.nativeUrl.get()) {
+                            val message = browserSslError(error)
+                            diagnostics.loadError.set(message)
+                            fail(BrowserReadException(message))
                         }
                     }
                     override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
@@ -184,6 +199,9 @@ class BrowserPageReader(
                         return true
                     }
                 }
+                view.webChromeClient = object : WebChromeClient() {
+                    override fun onProgressChanged(view: WebView, progress: Int) { diagnostics.progress.set(progress) }
+                }
                 view.setDownloadListener { actual, _, _, type, _ ->
                     if (allowed(actual) && BrowserPagePolicy.matchesRequest(url, actual) && BrowserPagePolicy.isDownloadable(type) && done.compareAndSet(false, true)) {
                         result.set(Jsoup.parse("", actual)); latch.countDown()
@@ -193,6 +211,7 @@ class BrowserPageReader(
                     override fun run() { if (!done.get()) { inspect(); main.postDelayed(this, pollToken, 300L) } }
                 }
                 main.postDelayed(poll, pollToken, 300L)
+                observer.started(url)
                 view.onResume()
                 view.loadUrl(url)
             } catch (e: Exception) { fail(BrowserReadException("无法启动网页读取：${e.message?.take(200)}", e)) }
@@ -229,6 +248,7 @@ class BrowserPageReader(
     }
 
     private fun configureIdle(view: WebView) {
+        view.webChromeClient = WebChromeClient()
         view.setDownloadListener(null)
         view.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =

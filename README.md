@@ -80,6 +80,7 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 7. 1.5.2 按 Mihon 的方式从当前 WebView 引擎推导浏览器 User-Agent，并在系统支持时同步 Client Hints 的品牌和版本。后台 WebView 配置实际视口；文档读取不依赖站点的 `JSON.stringify`。主文档中的被动 Cloudflare 检测脚本不会把已正常显示的作品误判成挑战页。
 8. 页面读取成功后保留同一个 WebView，空闲 30 秒再销毁，使延迟执行的检测脚本有机会完成。手动验证完成后将实际 WebView 交给后台读取器，同时缓存该已验证文档最多 2 分钟、供匹配请求使用一次；其他帖子、画师和分页不会误用缓存。共享会话等待和读取均支持暂停。
 9. 读取失败会区分验证页、文档读取失败、重定向、未完成加载和缺少作品信息。设置 → “网页验证” → “复制诊断”可取得上次后台读取和当前验证的版本、页面地址、标题、状态及视口，不包含 Cookie、API 密钥或页面正文。
+10. 1.5.3 等待主页面提交后再读取 DOM，空文档仍返回有效快照，不再误报“页面数据不完整”。“重新加载”始终打开请求地址，避免反复刷新 `about:blank`。连接和 TLS 错误保留在界面与诊断中，不会被等待作品的轮询提示覆盖；诊断同时记录浏览器地址、已提交文档地址及加载进度。TLS 证书错误保持取消加载，不忽略证书验证。
 
 首次同步作品很多的作者会明显慢于 API 模式。验证仍受站点策略和系统 WebView 版本影响；验证超时会明确提示，不会无限重试或把验证网页保存为原文件。
 
@@ -115,9 +116,28 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 
 调试 APK：`app/build/outputs/apk/debug/app-debug.apk`。
 
-推送到 `main` 且提交信息包含 `[release-debug]` 时，两组 CI 测试和构建全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.2`，附件为 `rule34-Downloader-v1.5.2-debug.apk`。其他版本的 Release 保留。
+推送到 `main` 且提交信息包含 `[release-debug]` 时，构建与必需的 Android 回归测试全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.3`，附件为 `rule34-Downloader-v1.5.3-debug.apk`。其他版本的 Release 保留。
 
 普通 main 提交和 PR 会运行 JVM 单元测试及 Android 35 上的真实 WebView、流式传输、暂停、MediaStore 和数据库升级回归测试，构建并上传调试 APK artifact，并使用临时测试密钥验证 Release 构建与签名；临时密钥签出的 Release APK 不会上传或发布。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
+
+### Android CLI 与端到端测试
+
+CI 安装 Google 官方 Android CLI，并在 Android 35 模拟器上操作真实应用界面：输入 Post ID → 识别作者 → 添加并下载 → 暂停/继续 → 校验已发布文件的 MD5、长度和 `IS_PENDING` → 打开相册与全屏预览 → 再次同步确认复用原 URI、没有再次请求原文件。这个可重复的测试使用受控 HTTP 站点，不代表真实原站验证成功。验证界面另测 `about:blank` 的重新加载和连接错误在轮询后仍然可见。
+
+- `android-regression-results`：测试报告、应用流程截图、文件校验结果，以及 Android CLI 的屏幕截图、布局和 WebView 版本。
+- `e2e-apks`：同一次构建、签名匹配的 App APK 与 instrumentation APK，可安装到设备重跑。
+- `live-origin-results`：独立使用真实匿名网络请求反馈中的帖子 `18905312`，只有成功解析并下载、读回校验和发布后才算通过。Cloudflare、网络或页面解析失败会保留失败测试与诊断；该外部检查允许失败，不阻止受控回归测试和构建，但不能据此宣称匿名原站下载成功。
+
+有 SDK 与设备的环境可运行：
+
+```bash
+./gradlew connectedDebugAndroidTest
+./gradlew -PliveSiteTest=true \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.homura251.rule34downloader.LiveSiteEndToEndTest \
+  -Pandroid.testInstrumentationRunnerArguments.livePostId=18905312 connectedDebugAndroidTest
+```
+
+真实原站检查只保存验证结果，不保留测试下载的文件。测试站点注入只在 Debug 构建内部供 instrumentation 使用，Release 禁止启用，应用设置不提供该入口。
 
 ## 固定密钥签名的 Release APK
 
