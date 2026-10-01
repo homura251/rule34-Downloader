@@ -26,6 +26,25 @@ class LiveSiteEndToEndTest {
         var uri: Uri? = null
         try {
             val resolved = network.htmlClient().getPostWithArtists(postId)
+            writeTestText(context, "live", "source-artists.txt", "Source post: $postId\n" +
+                resolved.artists.joinToString("\n") { "Artist: ${it.name}; site count: ${it.count}" })
+            resolved.artists.firstOrNull()?.let { artist ->
+                val ids = linkedSetOf<Long>()
+                var before: Long? = null
+                var pages = 0
+                while (true) {
+                    val page = network.htmlClient().getSearchPage(artist.name, 0, before)
+                    ids.addAll(page.ids)
+                    pages++
+                    if (page.ids.size < 42) break
+                    check(pages < 500) { "Live inventory exceeded 21,000 posts; result is incomplete." }
+                    before = page.ids.min()
+                    Thread.sleep(1_000)
+                }
+                writeTestText(context, "live", "source-inventory.txt",
+                    "PASS complete anonymous ID discovery\nArtist: ${artist.name}\nPosts: ${ids.size}\nPages: $pages\n" +
+                        "Metadata/original downloads: the reported source post only\n")
+            }
             assertTrue("Live original must include a reliable MD5", resolved.post.md5.matches(Regex("[a-fA-F0-9]{32}")))
             val record = DownloadRecord("test_live_e2e", postId, resolved.post.fileUrl, resolved.post.md5, DownloadStatus.PENDING, 0, 0)
             val saved = MediaStoreDownloader(context, network.client).download(record, {}, { _, _ -> })

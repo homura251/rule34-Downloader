@@ -256,6 +256,8 @@ class DownloadReliabilityTest {
                 }
                 val saved = record.copy(status = DownloadStatus.DOWNLOADED, localUri = result.uri.toString(), bytesDownloaded = 5, verifiedMd5 = hash)
                 assertNotNull(ExistingDownloads(context, tag) {}.find(saved) {})
+                context.contentResolver.openOutputStream(result.uri, "wt")!!.use { it.write("wrong".toByteArray()) }
+                assertNull("Same-length corruption must not reuse a verified URI", ExistingDownloads(context, tag) {}.find(saved) {})
                 context.contentResolver.openOutputStream(result.uri, "wt")!!.use { it.write("hel".toByteArray()) }
                 assertNull(ExistingDownloads(context, tag) {}.find(saved) {})
             } finally { deleteFiles(tag); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }

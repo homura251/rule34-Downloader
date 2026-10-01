@@ -2,9 +2,35 @@ package com.homura251.rule34downloader.network
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
+import org.jsoup.Jsoup
+import okhttp3.OkHttpClient
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Test
 
 class Rule34HtmlClientTest {
+    @Test fun cursorPagesUseOneIdBoundaryAndFetchNoPostDetails() {
+        val requests = mutableListOf<String>()
+        val client = Rule34HtmlClient(OkHttpClient(), browserFetch = { url, _ ->
+            requests += url
+            Jsoup.parse("<div class='image-list'><span class='thumb' id='s120'></span><span class='thumb' id='s119'></span></div>", url)
+        })
+        assertEquals(listOf(120L, 119L), client.getSearchPage("artist", 100).ids)
+        assertEquals("artist sort:id:desc id:>100", requests.last().toHttpUrl().queryParameter("tags"))
+        assertEquals(listOf(120L, 119L), client.getSearchPage("artist", 100, 121).ids)
+        assertEquals("artist sort:id:desc id:<121", requests.last().toHttpUrl().queryParameter("tags"))
+        assertEquals("0", requests.last().toHttpUrl().queryParameter("pid"))
+        assertEquals(2, requests.size)
+    }
+
+    @Test fun ignoredCursorOrMissingListCannotFinishDiscovery() {
+        val ignored = Rule34HtmlClient(OkHttpClient(), browserFetch = { url, _ ->
+            Jsoup.parse("<div class='image-list'><span class='thumb' id='s120'></span></div>", url)
+        })
+        assertThrows(RetryableApiException::class.java) { ignored.getSearchPage("artist", 0, 120) }
+        val missing = Rule34HtmlClient(OkHttpClient(), browserFetch = { url, _ -> Jsoup.parse("<p>Server error</p>", url) })
+        assertThrows(RetryableApiException::class.java) { missing.getSearchPage("artist", 0) }
+    }
     @Test
     fun parsesAndNormalizesThumbnailsIncludingLazyImages() {
         val html = """
