@@ -96,21 +96,23 @@ class BrowserSessionTest {
             val loaded = CountDownLatch(1)
             val captured = CountDownLatch(1)
             var view: WebView? = null
+            val loadedUrl = server.url("/loaded").toString()
+            val nextUrl = server.url("/next").toString()
             try {
                 InstrumentationRegistry.getInstrumentation().runOnMainSync {
                     view = network.createWebView(context).apply {
                         webViewClient = object : WebViewClient() { override fun onPageFinished(view: WebView, url: String) { loaded.countDown() } }
-                        loadUrl(server.url("/loaded").toString())
+                        loadUrl(loadedUrl)
                     }
                 }
                 assertTrue(loaded.await(10, TimeUnit.SECONDS))
                 InstrumentationRegistry.getInstrumentation().runOnMainSync {
-                    val observer = BrowserDocumentObserver(BrowserReadDiagnostics(server.url("/loaded").toString()))
-                    observer.started(server.url("/loaded").toString())
+                    val observer = BrowserDocumentObserver(BrowserReadDiagnostics(loadedUrl))
+                    observer.started(loadedUrl)
                     observer.inspect(view!!) { fail("Provisional document was inspected") }
-                    observer.committed(server.url("/loaded").toString())
+                    observer.committed(loadedUrl)
                     observer.inspect(view!!) { fail("Snapshot from an old navigation was delivered") }
-                    observer.started(server.url("/next").toString())
+                    observer.started(nextUrl)
                     BrowserPagePolicy.snapshot(view!!) { captured.countDown() }
                 }
                 assertTrue(captured.await(10, TimeUnit.SECONDS))

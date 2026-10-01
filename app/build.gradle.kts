@@ -57,7 +57,7 @@ android {
     }
 
     if (providers.gradleProperty("liveSiteTest").orNull == "true") {
-        sourceSets.getByName("androidTest").java.srcDir("src/liveTest/java")
+        sourceSets.getByName("androidTest").kotlin.srcDir("src/liveTest/java")
     }
 
     packaging {

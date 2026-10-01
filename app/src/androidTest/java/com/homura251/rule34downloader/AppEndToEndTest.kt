@@ -84,8 +84,9 @@ class AppEndToEndTest {
             }
         }
         server.start()
+        val endpoint = server.url("/")
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
-            network = Rule34Network(context, server.url("/"))
+            network = Rule34Network(context, endpoint)
             previous = Rule34Network.exchangeForTests(network)
         }
     }
