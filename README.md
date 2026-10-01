@@ -73,9 +73,9 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 
 1. 作者搜索页读取每页 Post ID（当前网页每页 42 项）。
 2. 逐条读取帖子详情页。
-3. 从详情页 Options / `.link-list` 的 “Original image” 获取原文件 URL。
+3. 从详情页 Options 的 “Original image” 获取原文件 URL，兼容没有 `.link-list` 的旧布局、嵌套文本和相对地址；也可读取帖子原图或视频 source。拒绝 sample、缩略图、视频封面、评论中的链接和站外地址。
 4. 从 `#tag-sidebar .tag-type-artist` 识别帖子中的 artist tag。
-5. 匿名元数据通过 WebView 读取渲染后的实际文档，并保留分页、详情读取的限速；后台页面最多等待 30 秒。原文件的 HTTP 挑战重试仍限制为一次，必要时切换到 WebView 流式传输，避免 Cookie 跨客户端后再次被拦截。
+5. 匿名元数据通过 WebView 读取渲染后的实际文档，并保留分页、详情读取的限速；后台页面最多等待 30 秒。1.5.1 修复页面刚出现导航/标签栏就提前读取的问题：等待主文档解析完成和对应的作品内容，详情页需读到原文件链接，支持原链接延迟渲染。页面已打开却缺少作品信息时返回带链接的页面错误，不再误报 Cloudflare 验证。原文件的 HTTP 挑战重试仍限制为一次，必要时切换到 WebView 流式传输，避免 Cookie 跨客户端后再次被拦截。
 6. 需要点击的验证：打开设置 → “网页验证”，确认实际请求页面可读取后自动返回，再重新同步。保留已有 Cookie，不要求 Cookie 更新，也不以 Cookie 变化宣告成功。允许 Cloudflare 子页面和验证资源；读取元数据时跳过帖子媒体资源。上次请求地址保存在本机，重启后仍可验证对应地址。
 
 首次同步作品很多的作者会明显慢于 API 模式。验证仍受站点策略和系统 WebView 版本影响；验证超时会明确提示，不会无限重试或把验证网页保存为原文件。
@@ -111,7 +111,7 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 
 调试 APK：`app/build/outputs/apk/debug/app-debug.apk`。
 
-推送到 `main` 且提交信息包含 `[release-debug]` 时，两组 CI 测试和构建全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.0`，附件为 `rule34-Downloader-v1.5.0-debug.apk`。其他版本的 Release 保留。
+推送到 `main` 且提交信息包含 `[release-debug]` 时，两组 CI 测试和构建全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.1`，附件为 `rule34-Downloader-v1.5.1-debug.apk`。其他版本的 Release 保留。
 
 普通 main 提交和 PR 会运行 JVM 单元测试及 Android 35 上的真实 WebView、流式传输、暂停、MediaStore 和数据库升级回归测试，构建并上传调试 APK artifact，并使用临时测试密钥验证 Release 构建与签名；临时密钥签出的 Release APK 不会上传或发布。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
 

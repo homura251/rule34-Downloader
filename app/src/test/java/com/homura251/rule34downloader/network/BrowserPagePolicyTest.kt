@@ -27,6 +27,20 @@ class BrowserPagePolicyTest {
             assertTrue(BrowserPagePolicy.isReadable(Jsoup.parse(html)))
         }
     }
+    @Test fun waitsForParsedHtmlAndTheRequestedPostOriginal() {
+        val url = "https://rule34.xxx/index.php?page=post&s=view&id=42"
+        val sidebar = "<div id='header'></div><div id='tag-sidebar'></div>"
+        assertFalse(BrowserPagePolicy.isReadable(Jsoup.parse(sidebar, url)))
+        val post = Jsoup.parse(sidebar + "<a href='/images/42/original.jpg'>Original image</a>", url)
+        assertFalse(BrowserPagePolicy.isReadable(post, "text/html", "loading"))
+        assertTrue(BrowserPagePolicy.isReadable(post, "text/html", "interactive"))
+        assertTrue(BrowserPagePolicy.isReadable(post, "text/html", "complete"))
+    }
+    @Test fun navigationCannotCompleteAListOrPoolRead() {
+        val navigation = "<div id='header'></div><ul id='navbar'></ul>"
+        assertFalse(BrowserPagePolicy.isReadable(Jsoup.parse(navigation, "https://rule34.xxx/index.php?page=post&s=list")))
+        assertFalse(BrowserPagePolicy.isReadable(Jsoup.parse(navigation, "https://rule34.xxx/index.php?page=pool&s=show&id=42")))
+    }
     @Test fun permitsChallengeSubframesAndRejectsExternalTopLevelNavigation() {
         assertFalse(BrowserPagePolicy.blockNavigation("https://challenges.cloudflare.com/turnstile", false, ::isRule34UrlString))
         assertTrue(BrowserPagePolicy.blockNavigation("https://example.test", true, ::isRule34UrlString))

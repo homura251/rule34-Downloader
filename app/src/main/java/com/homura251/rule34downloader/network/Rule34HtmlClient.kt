@@ -111,10 +111,10 @@ class Rule34HtmlClient(
     }
 
     private fun parsePostDocument(document: Document, postId: Long): Rule34Post {
-        val fileUrl = originalMediaUrl(document)
-            ?: throw ApiException("帖子 #$postId 未找到可下载的 Original image 链接。")
+        val fileUrl = Rule34MediaParser.originalUrl(document)
+            ?: throw RetryableApiException("帖子 #$postId 页面未提供可识别的原文件链接，请重新同步；若仍失败，请反馈帖子链接：${postUrl(postId)}")
         val filename = runCatching { URI(fileUrl).path.substringAfterLast('/') }.getOrDefault("")
-        val stem = filename.substringBeforeLast('.', filename).removePrefix("sample_")
+        val stem = filename.substringBeforeLast('.', filename)
         val md5 = stem.takeIf { it.matches(Regex("^[0-9a-fA-F]{32}$")) }.orEmpty()
 
         return Rule34Post(
@@ -184,16 +184,6 @@ class Rule34HtmlClient(
         return match.groupValues[1].replace(",", "").toLongOrNull() ?: 0L
     }
 
-    private fun originalMediaUrl(document: Document): String? {
-        val href = document
-            .select(".link-list a[href]")
-            .firstOrNull { it.text().contains("Original image", ignoreCase = true) }
-            ?.let { anchor -> anchor.absUrl("href").ifBlank { anchor.attr("href") } }
-            ?.trim()
-            ?: return null
-        return normalizeMediaUrl(href, document.baseUri())
-    }
-
     private fun normalizeMediaUrl(value: String, baseUri: String): String? {
         val resolved = runCatching {
             val base = URI(baseUri.ifBlank { SITE })
@@ -243,14 +233,8 @@ class Rule34HtmlClient(
             return parsePostIds(document)
         }
 
-        internal fun originalMediaUrlFromHtml(html: String, baseUrl: String = SITE): String? {
-            val document = Jsoup.parse(html, baseUrl)
-            val anchor = document
-                .select(".link-list a[href]")
-                .firstOrNull { it.text().contains("Original image", ignoreCase = true) }
-                ?: return null
-            return anchor.absUrl("href").ifBlank { anchor.attr("href") }
-        }
+        internal fun originalMediaUrlFromHtml(html: String, baseUrl: String = SITE): String? =
+            Rule34MediaParser.originalUrl(Jsoup.parse(html, baseUrl))
 
         internal fun thumbnailUrlsFromHtml(html: String): Map<Long, String> =
             parseThumbnailUrls(Jsoup.parse(html, SITE))
