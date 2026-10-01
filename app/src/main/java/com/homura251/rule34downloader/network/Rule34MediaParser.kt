@@ -30,7 +30,9 @@ internal object Rule34MediaParser {
         if (raw.isBlank()) return null
         val base = document.baseUri().ifBlank { "https://rule34.xxx/" }.toHttpUrlOrNull() ?: return null
         val resolved = base.resolve(raw.trim()) ?: return null
-        val url = resolved.newBuilder().scheme("https").build()
+        val url = resolved.newBuilder().scheme("https").apply {
+            if (resolved.scheme == "http" && resolved.port == 80) port(443)
+        }.build()
         if (!isRule34Url(url) || url.username.isNotEmpty() || url.password.isNotEmpty()) return null
         val parts = url.pathSegments
         if (parts.any { it.lowercase() in setOf("sample", "samples", "thumbs", "thumbnails") }) return null
