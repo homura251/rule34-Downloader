@@ -141,7 +141,7 @@ CI 安装 Google 官方 Android CLI，在 Android 35 模拟器上安装并启动
   -Pandroid.testInstrumentationRunnerArguments.livePostId=18905312 connectedDebugAndroidTest
 ```
 
-真实原站检查只保存验证结果，不保留测试下载的文件。测试站点注入只在 Debug 构建内部供 instrumentation 使用，Release 禁止启用，应用设置不提供该入口。
+真实原站检查只保存验证结果，不保留测试下载的文件。受控回归直接使用测试中的 HTTP 服务，不在正式应用中提供测试站点入口。
 
 ## 固定密钥签名的 Release APK
 

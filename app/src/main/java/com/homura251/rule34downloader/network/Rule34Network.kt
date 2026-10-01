@@ -7,7 +7,6 @@ import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
-import com.homura251.rule34downloader.BuildConfig
 import com.homura251.rule34downloader.data.AppPreferences
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -18,8 +17,7 @@ import okhttp3.Request
 import java.io.Closeable
 import java.util.concurrent.TimeUnit
 
-class Rule34Network internal constructor(context: Context, private val testEndpoint: HttpUrl? = null) {
-    init { require(testEndpoint == null || BuildConfig.DEBUG) { "测试传输仅适用于 Debug 构建。" } }
+class Rule34Network private constructor(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = AppPreferences(appContext)
     val userAgent: String = BrowserIdentity.userAgent(WebSettings.getDefaultUserAgent(appContext))
@@ -27,7 +25,7 @@ class Rule34Network internal constructor(context: Context, private val testEndpo
     var verificationUrl: String
         get() = preferences.verificationUrl?.takeIf(::isRule34UrlString) ?: VERIFICATION_URL
         private set(value) { preferences.verificationUrl = value }
-    private val pages by lazy { BrowserPageReader(appContext, ::createWebView, ::allowedPage, reuseSession = true,
+    private val pages by lazy { BrowserPageReader(appContext, ::createWebView, reuseSession = true,
         onDiagnostic = { preferences.browserDiagnostics = "$it\nUser-Agent: $userAgent" }) }
     private val verifiedPages = VerifiedPageCache()
     private val media by lazy { BrowserMediaReader(appContext, ::createWebView) }
@@ -38,9 +36,6 @@ class Rule34Network internal constructor(context: Context, private val testEndpo
         .readTimeout(60, TimeUnit.SECONDS)
         .followSslRedirects(false)
         .cookieJar(cookies)
-        .addInterceptor { chain ->
-            chain.proceed(chain.request().newBuilder().url(pageAddress(chain.request().url.toString())).build())
-        }
         .addInterceptor { chain ->
             chain.proceed(chain.request().newBuilder().header("User-Agent", userAgent).build())
         }
@@ -80,23 +75,10 @@ class Rule34Network internal constructor(context: Context, private val testEndpo
     fun htmlClient(http: OkHttpClient = client, checkActive: () -> Unit = {}): Rule34HtmlClient =
         Rule34HtmlClient(http, checkActive) { url, active ->
             active()
-            try { (verifiedPages.take(url) ?: pages.read(pageAddress(url), active).also {
-                if (testEndpoint != null) it.setBaseUri(url)
-            }).also { active(); cookies.flush() } }
+            try { (verifiedPages.take(url) ?: pages.read(url, active)).also { active(); cookies.flush() } }
             catch (e: CloudflareChallengeException) { rememberVerificationUrl(url); throw e }
             catch (e: BrowserReadException) { rememberVerificationUrl(url); throw e }
         }
-
-    private fun pageAddress(url: String): String {
-        val endpoint = testEndpoint ?: return url
-        val source = url.toHttpUrlOrNull()?.takeIf(::isRule34Url) ?: return url
-        return source.newBuilder().scheme(endpoint.scheme).host(endpoint.host).port(endpoint.port)
-            .username("").password("").build().toString()
-    }
-
-    private fun allowedPage(url: String): Boolean = isRule34UrlString(url) ||
-        (testEndpoint != null && url.toHttpUrlOrNull()?.let { it.scheme == testEndpoint.scheme &&
-            it.host == testEndpoint.host && it.port == testEndpoint.port } == true)
 
     fun completeVerification(url: String, snapshot: BrowserSnapshot, view: WebView) {
         require(isRule34UrlString(snapshot.document.baseUri()) && BrowserPagePolicy.matchesRequest(url, snapshot.document.baseUri()) &&
@@ -129,23 +111,12 @@ class Rule34Network internal constructor(context: Context, private val testEndpo
         if (isRule34UrlString(url)) verificationUrl = url
     }
 
-    internal fun closeForTests() {
-        check(BuildConfig.DEBUG)
-        pages.close()
-        client.connectionPool.evictAll()
-        client.dispatcher.executorService.shutdown()
-    }
-
     companion object {
         const val SITE = "https://rule34.xxx"
         const val VERIFICATION_URL = "$SITE/index.php?page=post&s=list"
         @Volatile private var instance: Rule34Network? = null
         fun get(context: Context): Rule34Network = instance ?: synchronized(this) {
             instance ?: Rule34Network(context).also { instance = it }
-        }
-        internal fun exchangeForTests(value: Rule34Network?): Rule34Network? = synchronized(this) {
-            check(BuildConfig.DEBUG)
-            instance.also { instance = value }
         }
     }
 }
