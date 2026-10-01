@@ -13,7 +13,6 @@ import com.homura251.rule34downloader.storage.MediaStoreDownloader
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 import java.security.MessageDigest
 
 /** Opt-in live origin probe. A challenge/timeout is a failure, never a mocked success or skipped test. */
@@ -22,7 +21,6 @@ class LiveSiteEndToEndTest {
     @Test fun anonymouslyResolveAndDownloadTheReportedLivePost() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val postId = InstrumentationRegistry.getArguments().getString("livePostId")?.toLong() ?: 18905312L
-        val report = File(context.getExternalFilesDir(null), "live-e2e/result.txt").also { it.parentFile!!.mkdirs() }
         lateinit var network: Rule34Network
         InstrumentationRegistry.getInstrumentation().runOnMainSync { network = Rule34Network.get(context) }
         var uri: Uri? = null
@@ -43,9 +41,9 @@ class LiveSiteEndToEndTest {
             context.contentResolver.query(saved.uri, arrayOf(MediaStore.Downloads.IS_PENDING), null, null, null)!!.use {
                 assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
             }
-            report.writeText("PASS: actual anonymous post -> original -> verified MediaStore publication\nPost: $postId\nBytes: $readBytes\nMD5: ${saved.verifiedMd5}\n${network.browserDiagnostics}\n")
+            writeTestText(context, "live", "result.txt", "PASS: actual anonymous post -> original -> verified MediaStore publication\nPost: $postId\nBytes: $readBytes\nMD5: ${saved.verifiedMd5}\n${network.browserDiagnostics}\n")
         } catch (error: Throwable) {
-            report.writeText("FAILED: actual anonymous origin did not complete\nPost: $postId\n${error.javaClass.simpleName}: ${error.message}\n${network.browserDiagnostics}\n")
+            writeTestText(context, "live", "result.txt", "FAILED: actual anonymous origin did not complete\nPost: $postId\n${error.javaClass.simpleName}: ${error.message}\n${network.browserDiagnostics}\n")
             throw error
         } finally { uri?.let { context.contentResolver.delete(it, null, null) } }
     }

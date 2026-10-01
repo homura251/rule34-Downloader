@@ -28,7 +28,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -131,7 +130,10 @@ class AppEndToEndTest {
         assertEquals(1, originals.get())
 
         waitFor("查看作品")
-        ui.onNodeWithText("查看作品").performScrollTo().performClick()
+        ui.onNodeWithText("查看作品").performScrollTo()
+        capture("anonymous-before-gallery.png")
+        ui.onNodeWithText("查看作品").performClick()
+        capture("anonymous-gallery-open.png")
         waitFor("画师作品 · 1 项")
         ui.onNodeWithText("#42").performClick()
         waitFor("#42 · 1/1")
@@ -146,20 +148,27 @@ class AppEndToEndTest {
         assertEquals(record.localUri, database.getSavedRecords(tag).single().localUri)
         assertEquals(1, originals.get())
         capture("anonymous-reuse.png")
-        File(context.getExternalFilesDir(null), "e2e/result.txt").writeText(
+        writeTestText(context, "controlled", "result.txt",
             "PASS: anonymous UI -> pause/resume -> Chromium original parser -> WorkManager -> MediaStore -> preview -> resync reuse\n" +
                 "Origin: controlled MockWebServer (not the live site)\nBytes: ${image.size}\nMD5: $hash\nOriginal requests: ${originals.get()}\n",
         )
     }
 
-    private fun waitFor(text: String) = ui.waitUntil(20_000) { ui.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    private fun waitFor(text: String) {
+        try { ui.waitUntil(20_000) { ui.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() } }
+        catch (error: ComposeTimeoutException) {
+            capture("failure.png")
+            val semantics = ui.onRoot().printToString()
+            writeTestText(context, "controlled", "failure-semantics.txt", semantics)
+            throw AssertionError("Missing UI text: $text\n$semantics", error)
+        }
+    }
     private fun workFinished() = WorkManager.getInstance(context).getWorkInfosForUniqueWork("rule34-sync-$tag")
         .get(5, TimeUnit.SECONDS).all { it.state.isFinished }
     private fun capture(name: String) {
         ui.waitForIdle()
         val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot() ?: error("No screenshot")
-        val file = File(context.getExternalFilesDir(null), "e2e/$name").also { it.parentFile!!.mkdirs() }
-        file.outputStream().use { assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        writeTestEvidence(context, "controlled", name, "image/png") { assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)) }
         screenshot.recycle()
     }
     private fun html(body: String) = MockResponse().setHeader("Content-Type", "text/html; charset=utf-8").setBody(body)
