@@ -10,6 +10,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -81,7 +82,6 @@ fun HomeScreen(
     onBrowse: (String) -> Unit,
 ) {
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
@@ -101,12 +101,18 @@ fun HomeScreen(
                 },
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onAdd,
-                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                text = { Text("添加作者/图集") },
-            )
+        bottomBar = {
+            Column(
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                SnackbarHost(snackbarHostState, modifier = Modifier.padding(bottom = 8.dp))
+                ExtendedFloatingActionButton(
+                    onClick = onAdd,
+                    icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                    text = { Text("添加作者/图集") },
+                )
+            }
         },
     ) { padding ->
         LazyColumn(
@@ -115,7 +121,7 @@ fun HomeScreen(
                 start = 16.dp,
                 end = 16.dp,
                 top = 12.dp,
-                bottom = 104.dp,
+                bottom = 24.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

@@ -3,16 +3,24 @@ package com.homura251.rule34downloader
 import android.content.Context
 import android.webkit.CookieManager
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.webkit.WebViewFeature
 import com.homura251.rule34downloader.network.BrowserPageReader
+import com.homura251.rule34downloader.network.BrowserPagePolicy
+import com.homura251.rule34downloader.network.BrowserReadException
+import com.homura251.rule34downloader.network.BrowserSnapshot
+import com.homura251.rule34downloader.network.BrowserDocumentObserver
+import com.homura251.rule34downloader.network.BrowserReadDiagnostics
 import com.homura251.rule34downloader.network.Rule34Network
 import com.homura251.rule34downloader.work.SyncControl
 import com.homura251.rule34downloader.work.SyncPausedException
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -25,6 +33,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class BrowserSessionTest {
@@ -39,6 +48,92 @@ class BrowserSessionTest {
             CookieManager.getInstance().removeAllCookies { cleared.countDown() }
         }
         assertTrue(cleared.await(10, TimeUnit.SECONDS))
+    }
+
+    @Test fun documentWithoutRootRemainsAValidSnapshotInsteadOfAFramingFailure() {
+        val captured = CountDownLatch(1)
+        val result = AtomicReference<Result<BrowserSnapshot>>()
+        var view: WebView? = null
+        MockWebServer().use { server ->
+            server.enqueue(html("<script>document.documentElement.remove();</script>"))
+            val url = server.url("/empty-document").toString()
+            try {
+                InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                    view = network.createWebView(context).apply {
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageFinished(view: WebView, url: String) {
+                                BrowserPagePolicy.snapshot(view) { result.set(it); captured.countDown() }
+                            }
+                        }
+                        loadUrl(url)
+                    }
+                }
+                assertTrue(captured.await(10, TimeUnit.SECONDS))
+                val snapshot = result.get().getOrThrow()
+                assertFalse(snapshot.hasDocument)
+                assertEquals(url, snapshot.document.baseUri())
+                assertEquals("complete", snapshot.readyState)
+            } finally { InstrumentationRegistry.getInstrumentation().runOnMainSync { view?.destroy() } }
+        }
+    }
+
+    @Test fun delayedFirstResponseDoesNotInspectTheInitialBlankDocument() {
+        MockWebServer().use { server ->
+            server.enqueue(html("<div class='image-list'></div>").setHeadersDelay(1500, TimeUnit.MILLISECONDS))
+            val diagnostics = AtomicReference("")
+            val reader = BrowserPageReader(context, network::createWebView, local, 10_000, onDiagnostic = diagnostics::set)
+            try {
+                assertNotNull(reader.read(server.url("/delayed-first-response").toString()).selectFirst(".image-list"))
+                assertTrue(diagnostics.get().contains("读取错误: \n"))
+                assertFalse(diagnostics.get().contains("about:blank"))
+            } finally { reader.close() }
+        }
+    }
+
+    @Test fun observerNeverCapturesAProvisionalDocumentOrAnOlderNavigation() {
+        MockWebServer().use { server ->
+            server.enqueue(html("<div class='image-list'></div>"))
+            val loaded = CountDownLatch(1)
+            val captured = CountDownLatch(1)
+            var view: WebView? = null
+            val loadedUrl = server.url("/loaded").toString()
+            val nextUrl = server.url("/next").toString()
+            try {
+                InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                    view = network.createWebView(context).apply {
+                        webViewClient = object : WebViewClient() { override fun onPageFinished(view: WebView, url: String) { loaded.countDown() } }
+                        loadUrl(loadedUrl)
+                    }
+                }
+                assertTrue(loaded.await(10, TimeUnit.SECONDS))
+                InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                    val observer = BrowserDocumentObserver(BrowserReadDiagnostics(loadedUrl))
+                    observer.started(loadedUrl)
+                    observer.inspect(view!!) { fail("Provisional document was inspected") }
+                    observer.committed(loadedUrl)
+                    observer.inspect(view!!) { fail("Snapshot from an old navigation was delivered") }
+                    observer.started(nextUrl)
+                    BrowserPagePolicy.snapshot(view!!) { captured.countDown() }
+                }
+                assertTrue(captured.await(10, TimeUnit.SECONDS))
+            } finally { InstrumentationRegistry.getInstrumentation().runOnMainSync { view?.destroy() } }
+        }
+    }
+
+    @Test fun invalidCertificateReportsTlsFailureWithoutWaitingForBlankPageTimeout() {
+        MockWebServer().use { server ->
+            val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+            server.useHttps(HandshakeCertificates.Builder().heldCertificate(certificate).build().sslSocketFactory(), false)
+            server.enqueue(html("<div class='image-list'></div>"))
+            val diagnostics = AtomicReference("")
+            val reader = BrowserPageReader(context, network::createWebView, local, 10_000, onDiagnostic = diagnostics::set)
+            try {
+                val error = assertThrows(BrowserReadException::class.java) { reader.read(server.url("/invalid-certificate").toString()) }
+                assertTrue(error.message.orEmpty(), error.message.orEmpty().contains("TLS") || error.message.orEmpty().contains("-11"))
+                assertTrue(diagnostics.get().contains("连接错误: 网页"))
+                assertFalse(error.message.orEmpty().contains("页面数据"))
+            } finally { reader.close() }
+        }
     }
 
     @Test fun detachedBrowserHasViewportAndConsistentIdentityEvenIfSiteOverridesJson() {
@@ -142,8 +237,15 @@ class BrowserSessionTest {
                 }
                 assertTrue(requested.await(5, TimeUnit.SECONDS))
                 val waiting = CountDownLatch(1)
+                val waitingChecks = AtomicInteger()
                 val second = executor.submit<Throwable?> {
-                    try { waiting.countDown(); reader.read(server.url("/list").toString(), waitingControl::checkActive); null } catch (e: Exception) { e }
+                    try {
+                        reader.read(server.url("/list").toString()) {
+                            waitingControl.checkActive()
+                            if (waitingChecks.incrementAndGet() >= 2) waiting.countDown()
+                        }
+                        null
+                    } catch (e: Exception) { e }
                 }
                 assertTrue(waiting.await(5, TimeUnit.SECONDS))
                 waitingControl.pause()

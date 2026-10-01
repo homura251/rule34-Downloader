@@ -93,12 +93,8 @@ class Rule34Network private constructor(context: Context) {
         pages.adoptVerifiedView(view)
     }
 
-    fun verificationDiagnostic(url: String, snapshot: BrowserSnapshot?, reason: String, httpStatus: Int = 0,
-        challengeHeader: Boolean = false): String = BrowserReadDiagnostics(url).apply {
-        this.snapshot.set(snapshot)
-        httpError.set(httpStatus)
-        this.challengeHeader.set(challengeHeader)
-    }.report(reason) + "\nUser-Agent: $userAgent"
+    internal fun verificationDiagnostic(diagnostics: BrowserReadDiagnostics, reason: String): String =
+        diagnostics.report(reason) + "\nUser-Agent: $userAgent"
 
     fun openBrowserMedia(url: String, checkActive: () -> Unit, registerCancel: (() -> Unit) -> Closeable): MediaSource {
         try { return media.open(url, checkActive, registerCancel) }
