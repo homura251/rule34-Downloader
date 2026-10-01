@@ -38,25 +38,37 @@ object BrowserPagePolicy {
             document.selectFirst("#challenge-form, #cf-challenge-running") != null ||
             document.html().contains("_cf_chl_opt", true)
 
-    fun isReadable(document: Document, contentType: String = "text/html"): Boolean {
+    fun isReadable(document: Document, contentType: String = "text/html", readyState: String = "complete"): Boolean {
         if (contentType.startsWith("image/") || contentType.startsWith("video/")) return true
-        if (isChallenge(document)) return false
+        if (readyState !in listOf("interactive", "complete") || isChallenge(document)) return false
+        val url = document.baseUri().toHttpUrlOrNull()
+        val page = url?.queryParameter("page")
+        val section = url?.queryParameter("s")
+        // Navigation and tag sidebars can be parsed before the media link.
+        // Wait for the requested content, including JS-rendered content.
+        if (page == "post" && section == "view") return Rule34MediaParser.originalUrl(document) != null
+        if (page == "post" && section == "list") return document.selectFirst(".image-list") != null || isEmptyList(document)
+        if (page == "pool" && section == "show") return hasPoolHeading(document)
         return document.selectFirst(".image-list, #tag-sidebar, #image, #navbar, #header") != null ||
-            document.select("h1, h2, h3, h4").any { it.text().trim().startsWith("Pool:", true) } ||
-            document.body().text().contains("Nobody here but us chickens", true)
+            hasPoolHeading(document) || isEmptyList(document)
     }
+
+    private fun hasPoolHeading(document: Document): Boolean =
+        document.select("h1, h2, h3, h4").any { it.text().trim().startsWith("Pool:", true) }
+    private fun isEmptyList(document: Document): Boolean =
+        document.body().text().let { it.contains("Nobody here but us chickens", true) || it.contains("No posts found", true) }
 
     // Challenge subframes must be allowed. Only top-level navigations are restricted.
     fun blockNavigation(url: String, mainFrame: Boolean, allowed: (String) -> Boolean): Boolean =
         mainFrame && !allowed(url)
 
-    fun snapshot(view: WebView, callback: (Document, String) -> Unit) {
+    fun snapshot(view: WebView, callback: (Document, String, String) -> Unit) {
         view.evaluateJavascript(
-            "JSON.stringify({url:location.href,html:document.documentElement.outerHTML,type:document.contentType})",
+            "JSON.stringify({url:location.href,html:document.documentElement.outerHTML,type:document.contentType,ready:document.readyState})",
         ) { value ->
             runCatching {
                 val json = JSONObject(JSONTokener(value).nextValue() as String)
-                callback(Jsoup.parse(json.getString("html"), json.getString("url")), json.optString("type", "text/html"))
+                callback(Jsoup.parse(json.getString("html"), json.getString("url")), json.optString("type", "text/html"), json.optString("ready"))
             }
         }
     }
@@ -78,6 +90,7 @@ class BrowserPageReader(
         val latch = CountDownLatch(1)
         val result = AtomicReference<Document?>()
         val failure = AtomicReference<Exception?>()
+        val incompletePage = AtomicReference<Document?>()
         val pollToken = Any()
         var webView: WebView? = null // Main thread only.
         fun fail(error: Exception) {
@@ -91,9 +104,12 @@ class BrowserPageReader(
                 var httpError = 0
                 fun inspect() {
                     if (done.get()) return
-                    BrowserPagePolicy.snapshot(view) { document, type ->
-                        if (allowed(document.baseUri()) && BrowserPagePolicy.matchesRequest(url, document.baseUri()) &&
-                            BrowserPagePolicy.isReadable(document, type) && done.compareAndSet(false, true)) {
+                    BrowserPagePolicy.snapshot(view) { document, type, ready ->
+                        val matches = allowed(document.baseUri()) && BrowserPagePolicy.matchesRequest(url, document.baseUri())
+                        if (matches) {
+                            incompletePage.set(document.takeIf { !BrowserPagePolicy.isChallenge(it) && ready in listOf("interactive", "complete") })
+                        }
+                        if (matches && BrowserPagePolicy.isReadable(document, type, ready) && done.compareAndSet(false, true)) {
                             result.set(document)
                             latch.countDown()
                         } else if (!BrowserPagePolicy.isChallenge(document) && document.body().text().isNotBlank()) {
@@ -103,7 +119,10 @@ class BrowserPageReader(
                     }
                 }
                 view.webViewClient = object : WebViewClient() {
-                    override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { httpError = 0 }
+                    override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                        httpError = 0
+                        incompletePage.set(null)
+                    }
                     override fun onPageFinished(view: WebView, url: String) = inspect()
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                         BrowserPagePolicy.blockNavigation(request.url.toString(), request.isForMainFrame, allowed)
@@ -149,9 +168,12 @@ class BrowserPageReader(
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
             while (!latch.await(100, TimeUnit.MILLISECONDS)) {
                 checkActive()
-                if (System.nanoTime() >= deadline) throw CloudflareChallengeException(
-                    "WebView 未能读取请求页面。请在设置中完成「网页验证」后重试；若仍停在验证页，请更新 Android System WebView。",
-                )
+                if (System.nanoTime() >= deadline) {
+                    if (incompletePage.get() != null) throw RetryableApiException("网页已打开，但未读取到完整作品信息，请重新同步；若仍失败，请反馈页面链接：$url")
+                    throw CloudflareChallengeException(
+                        "WebView 未能读取请求页面。请在设置中完成「网页验证」后重试；若仍停在验证页，请更新 Android System WebView。",
+                    )
+                }
             }
             checkActive()
             failure.get()?.let { throw it }

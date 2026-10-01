@@ -50,15 +50,17 @@ class WebVerificationActivity : Activity() {
             webView = view
             fun inspect() {
                 if (isFinishing || verified) return
-                BrowserPagePolicy.snapshot(view) { document, type ->
+                BrowserPagePolicy.snapshot(view) { document, type, ready ->
                     if (!isFinishing && !verified && isRule34UrlString(document.baseUri()) &&
-                        BrowserPagePolicy.matchesRequest(verificationUrl, document.baseUri()) && BrowserPagePolicy.isReadable(document, type)) {
+                        BrowserPagePolicy.matchesRequest(verificationUrl, document.baseUri()) && BrowserPagePolicy.isReadable(document, type, ready)) {
                         verified = true
                         network.cookies.flush()
                         Toast.makeText(this, "请求页面已可读取，请重新同步。", Toast.LENGTH_LONG).show()
                         finish()
                     } else if (BrowserPagePolicy.isChallenge(document)) {
                         status.text = "仍在验证页面，请完成下方操作。若反复验证，请更新 Android System WebView 后重试。"
+                    } else if (ready in listOf("interactive", "complete")) {
+                        status.text = "页面已打开，正在等待作品信息。若一直无法加载，请返回重新同步并反馈报错中的帖子链接。"
                     }
                 }
             }

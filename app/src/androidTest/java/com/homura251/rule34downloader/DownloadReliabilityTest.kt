@@ -16,6 +16,7 @@ import com.homura251.rule34downloader.network.BrowserMediaReader
 import com.homura251.rule34downloader.network.BrowserPageReader
 import com.homura251.rule34downloader.network.CloudflareChallengeException
 import com.homura251.rule34downloader.network.Rule34Network
+import com.homura251.rule34downloader.network.Rule34HtmlClient
 import com.homura251.rule34downloader.network.RetryableApiException
 import com.homura251.rule34downloader.storage.ExistingDownloads
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
@@ -26,6 +27,8 @@ import okhttp3.OkHttpClient
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.RecordedRequest
 import okio.Buffer
 import org.junit.Assert.*
 import org.junit.Before
@@ -68,7 +71,7 @@ class DownloadReliabilityTest {
                 <title>Just a moment...</title><form id="challenge-form"></form>
                 <script>setTimeout(() => {
                   document.title='Rule34';
-                  document.body.innerHTML='<div id="tag-sidebar"></div><div class="link-list"><a href="/original.jpg">Original image</a></div>';
+                  document.body.innerHTML='<div id="tag-sidebar"></div><div class="link-list"><a href="https://wimg.rule34.xxx/images/42/original.jpg">Original image</a></div>';
                 }, 300);</script>
             """.trimIndent()))
             val document = pages().read(url)
@@ -82,6 +85,76 @@ class DownloadReliabilityTest {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody("<div class='image-list'></div>"))
             assertNotNull(pages().read(server.url("/list").toString()).selectFirst(".image-list"))
+        }
+    }
+
+    @Test fun anonymousDownloadWaitsForDelayedLegacyOriginalAndPublishesVerifiedImage() {
+        val tag = "test_${UUID.randomUUID()}"
+        val bitmap = android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)
+        val bytes = ByteArrayOutputStream().also { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        bitmap.recycle()
+        val hash = md5(bytes)
+        val original = "https://wimg.rule34.xxx/images/42/$hash.png"
+        MockWebServer().use { server ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = when (request.requestUrl?.encodedPath) {
+                    "/index.php" -> MockResponse().setHeader("Content-Type", "text/html").setBody("""
+                        <html><head><title>Rule34</title></head><body>
+                        <div id="header">Rule34</div><ul id="tag-sidebar">
+                          <li class="tag-type-artist"><a href="?page=post&amp;s=list&amp;tags=test_artist">test artist</a> 1</li>
+                        </ul><div id="options"><h5>Options</h5></div>
+                        <script>setTimeout(() => {
+                          document.getElementById('options').innerHTML += '<ul><li><a href="$original">Original image</a></li></ul>';
+                        }, 1200);</script></body></html>
+                    """.trimIndent())
+                    "/images/42/$hash.png" -> MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(bytes))
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+            val client = OkHttpClient.Builder().addInterceptor { chain ->
+                chain.proceed(chain.request().newBuilder().url(server.url(chain.request().url.encodedPath)).build())
+            }.build()
+            try {
+                val postUrl = server.url("/index.php?page=post&s=view&id=42").toString()
+                val resolved = Rule34HtmlClient(client, browserFetch = { _, active -> pages().read(postUrl, active) }).getPostWithArtists(42)
+                assertEquals(original, resolved.post.fileUrl)
+                assertEquals(hash, resolved.post.md5)
+                assertEquals("test_artist", resolved.artists.single().name)
+                val record = DownloadRecord(tag, 42, resolved.post.fileUrl, resolved.post.md5, DownloadStatus.PENDING, 0, 0)
+                val saved = MediaStoreDownloader(context, client).download(record, {}, { _, _ -> })
+                assertEquals(hash, saved.verifiedMd5)
+                assertEquals(bytes.size.toLong(), saved.bytesWritten)
+                context.contentResolver.openInputStream(saved.uri)!!.use { assertArrayEquals(bytes, it.readBytes()) }
+                context.contentResolver.query(saved.uri, arrayOf(MediaStore.Downloads.IS_PENDING), null, null, null)!!.use {
+                    assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+                }
+                assertEquals(1, fileCount(tag))
+            } finally { deleteFiles(tag); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
+        }
+    }
+
+    @Test fun waitsForTheMainHtmlTailInsteadOfReturningAReadableSidebar() {
+        MockWebServer().use { server ->
+            val html = """
+                <html><head><title>Rule34</title></head><body><div id="header">Rule34</div>
+                <a href="https://wimg.rule34.xxx/images/42/0123456789abcdef0123456789abcdef.png">Original image</a>
+                <!-- ${" ".repeat(2048)} -->
+                <ul id="tag-sidebar"><li class="tag-type-artist"><a href="?tags=tail_artist">tail artist</a> 1</li></ul>
+                </body></html>
+            """.trimIndent()
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody(html).throttleBody(512, 300, TimeUnit.MILLISECONDS))
+            val url = server.url("/index.php?page=post&s=view&id=42").toString()
+            val client = Rule34HtmlClient(OkHttpClient(), browserFetch = { _, active -> pages().read(url, active) })
+            assertEquals("tail_artist", client.getPostWithArtists(42).artists.single().name)
+        }
+    }
+
+    @Test fun missingPostContentReportsThePageInsteadOfAnotherCloudflareVerification() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody("<div id='header'>Rule34</div><div id='tag-sidebar'></div>"))
+            val url = server.url("/index.php?page=post&s=view&id=42").toString()
+            val error = assertThrows(RetryableApiException::class.java) { pages(1_500).read(url) }
+            assertTrue(error.message.orEmpty().contains(url))
         }
     }
 
