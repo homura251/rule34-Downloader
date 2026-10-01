@@ -2,7 +2,6 @@ package com.homura251.rule34downloader
 
 import android.content.ClipboardManager
 import android.content.Context
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -27,6 +26,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayInputStream
+import java.net.ServerSocket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -44,7 +44,9 @@ class WebVerificationUiTest {
                 val blank = CountDownLatch(1)
                 val requested = CountDownLatch(1)
                 val finished = CountDownLatch(1)
+                val failed = CountDownLatch(1)
                 val started = AtomicReference("")
+                val connectionError = AtomicReference("")
                 scenario.onActivity { activity ->
                     val view = descendants(activity.window.decorView).filterIsInstance<WebView>().single()
                     view.stopLoading()
@@ -59,10 +61,14 @@ class WebVerificationUiTest {
                             delegate.onPageFinished(view, url)
                             if (url == "about:blank") blank.countDown() else if (url == target) finished.countDown()
                         }
-                        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse =
-                            WebResourceResponse("text/html", "UTF-8", ByteArrayInputStream("<title>Controlled verification document</title><p>Waiting for original</p>".toByteArray()))
+                        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                            if (request.url.host == "127.0.0.1") null else
+                                WebResourceResponse("text/html", "UTF-8", ByteArrayInputStream("<title>Controlled verification document</title><p>Waiting for original</p>".toByteArray()))
                         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                             delegate.onReceivedError(view, request, error)
+                            if (request.isForMainFrame && request.url.host == "127.0.0.1") {
+                                connectionError.set(error.description.toString()); failed.countDown()
+                            }
                         }
                     }
                     view.loadUrl("about:blank")
@@ -73,37 +79,30 @@ class WebVerificationUiTest {
                 assertEquals(target, started.get())
                 assertTrue(finished.await(10, TimeUnit.SECONDS))
 
+                val refusedUrl = ServerSocket(0).use { "http://127.0.0.1:${it.localPort}/connection-refused" }
                 val polled = CountDownLatch(1)
                 scenario.onActivity { activity ->
                     val view = descendants(activity.window.decorView).filterIsInstance<WebView>().single()
-                    val request = object : WebResourceRequest {
-                        override fun getUrl() = Uri.parse(target)
-                        override fun isForMainFrame() = true
-                        override fun isRedirect() = false
-                        override fun hasGesture() = false
-                        override fun getMethod() = "GET"
-                        override fun getRequestHeaders() = emptyMap<String, String>()
-                    }
-                    val error = object : WebResourceError() {
-                        override fun getErrorCode() = WebViewClient.ERROR_HOST_LOOKUP
-                        override fun getDescription(): CharSequence = "test DNS failure"
-                    }
-                    view.webViewClient.onReceivedError(view, request, error)
+                    view.loadUrl(refusedUrl)
+                }
+                assertTrue(failed.await(10, TimeUnit.SECONDS))
+                assertTrue(connectionError.get().isNotBlank())
+                scenario.onActivity {
                     Handler(Looper.getMainLooper()).postDelayed({ polled.countDown() }, 900)
                 }
                 assertTrue(polled.await(5, TimeUnit.SECONDS))
                 scenario.onActivity { activity ->
                     assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>().any {
-                        it.text.toString().contains("test DNS failure")
+                        it.text.toString().contains(connectionError.get())
                     })
                 }
                 onView(withText("复制诊断")).perform(click())
                 scenario.onActivity { activity ->
                     val text = activity.getSystemService(ClipboardManager::class.java).primaryClip!!.getItemAt(0).text.toString()
                     assertTrue(text.contains("连接错误: 网页连接失败"))
-                    assertTrue(text.contains("test DNS failure"))
+                    assertTrue(text.contains(connectionError.get()))
                     assertFalse(text.substringAfter("当前验证：").contains("正在等待请求的作品信息"))
-                    assertTrue(text.contains("已提交文档: $target"))
+                    assertTrue(text.contains("已提交文档: 未提交"))
                 }
             }
         } finally { preferences.verificationUrl = previous }
