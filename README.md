@@ -26,7 +26,7 @@
 - WorkManager 支持手动同步和可选的 15 分钟 / 1 小时 / 6 小时 / 24 小时后台检查。
 - Material Design 3 / Material You：Android 12+ 动态配色、状态切换动画、文件级进度、Snackbar 与完成通知。
 - API User ID / API Key 使用 Android Keystore AES-GCM 加密后仅保存在本机。
-- 匿名网页使用 WebView 的 Chromium 网络会话读取，验证页和下载共享真实 WebView User-Agent 与 Cookie。原文件的普通 HTTP 传输被挑战拦截时，可切换到同源 WebView 流式传输。不增加 Android 权限。
+- 匿名网页使用 WebView 的 Chromium 网络会话读取，验证页和下载共享与当前引擎匹配的浏览器 User-Agent、Client Hints 与 Cookie。原文件的普通 HTTP 传输被挑战拦截时，可切换到同源 WebView 流式传输。不增加 Android 权限。
 
 ## 使用
 
@@ -77,10 +77,14 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 4. 从 `#tag-sidebar .tag-type-artist` 识别帖子中的 artist tag。
 5. 匿名元数据通过 WebView 读取渲染后的实际文档，并保留分页、详情读取的限速；后台页面最多等待 30 秒。1.5.1 修复页面刚出现导航/标签栏就提前读取的问题：等待主文档解析完成和对应的作品内容，详情页需读到原文件链接，支持原链接延迟渲染。页面已打开却缺少作品信息时返回带链接的页面错误，不再误报 Cloudflare 验证。原文件的 HTTP 挑战重试仍限制为一次，必要时切换到 WebView 流式传输，避免 Cookie 跨客户端后再次被拦截。
 6. 需要点击的验证：打开设置 → “网页验证”，确认实际请求页面可读取后自动返回，再重新同步。保留已有 Cookie，不要求 Cookie 更新，也不以 Cookie 变化宣告成功。允许 Cloudflare 子页面和验证资源；读取元数据时跳过帖子媒体资源。上次请求地址保存在本机，重启后仍可验证对应地址。
+7. 1.5.2 按 Mihon 的方式从当前 WebView 引擎推导浏览器 User-Agent，并在系统支持时同步 Client Hints 的品牌和版本。后台 WebView 配置实际视口；文档读取不依赖站点的 `JSON.stringify`。主文档中的被动 Cloudflare 检测脚本不会把已正常显示的作品误判成挑战页。
+8. 页面读取成功后保留同一个 WebView，空闲 30 秒再销毁，使延迟执行的检测脚本有机会完成。手动验证完成后将实际 WebView 交给后台读取器，同时缓存该已验证文档最多 2 分钟、供匹配请求使用一次；其他帖子、画师和分页不会误用缓存。共享会话等待和读取均支持暂停。
+9. 读取失败会区分验证页、文档读取失败、重定向、未完成加载和缺少作品信息。设置 → “网页验证” → “复制诊断”可取得上次后台读取和当前验证的版本、页面地址、标题、状态及视口，不包含 Cookie、API 密钥或页面正文。
 
 首次同步作品很多的作者会明显慢于 API 模式。验证仍受站点策略和系统 WebView 版本影响；验证超时会明确提示，不会无限重试或把验证网页保存为原文件。
 
 原文件的 HTTP 拦截流程参考 [Tachiyomi CloudflareInterceptor](https://github.com/izfaruqi/tachiyomi/blob/master/app/src/main/java/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt) 的 WebView / Cookie / 重试流程；同时使用 `cf-mitigated: challenge` 和旧验证页特征识别挑战，避免把普通限流当作验证。
+浏览器身份处理参考 [Mihon WebViewUtil](https://github.com/mihonapp/mihon/blob/master/core/common/src/main/kotlin/eu/kanade/tachiyomi/util/system/WebViewUtil.kt)。
 
 ## 存储与权限
 
@@ -111,7 +115,7 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 
 调试 APK：`app/build/outputs/apk/debug/app-debug.apk`。
 
-推送到 `main` 且提交信息包含 `[release-debug]` 时，两组 CI 测试和构建全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.1`，附件为 `rule34-Downloader-v1.5.1-debug.apk`。其他版本的 Release 保留。
+推送到 `main` 且提交信息包含 `[release-debug]` 时，两组 CI 测试和构建全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.2`，附件为 `rule34-Downloader-v1.5.2-debug.apk`。其他版本的 Release 保留。
 
 普通 main 提交和 PR 会运行 JVM 单元测试及 Android 35 上的真实 WebView、流式传输、暂停、MediaStore 和数据库升级回归测试，构建并上传调试 APK artifact，并使用临时测试密钥验证 Release 构建与签名；临时密钥签出的 Release APK 不会上传或发布。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
 

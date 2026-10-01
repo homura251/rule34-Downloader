@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -105,6 +106,14 @@ class BrowserMediaReader(
                 // and subframes can never navigate into this WebView.
                 web.webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
+                    override fun onRenderProcessGone(web: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        error.set(IOException("原文件传输的网页渲染进程已退出，请重新同步。"))
+                        ended.set(true); headersReady.countDown()
+                        web.removeJavascriptInterface("Transfer")
+                        web.destroy()
+                        view = null
+                        return true
+                    }
                 }
                 web.addJavascriptInterface(bridge, "Transfer")
                 val origin = URI(url).let { "${it.scheme}://${it.rawAuthority}/" }

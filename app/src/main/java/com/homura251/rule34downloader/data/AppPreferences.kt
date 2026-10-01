@@ -25,6 +25,10 @@ class AppPreferences(context: Context) {
         get() = prefs.getString("verification_url", null)
         set(value) = prefs.edit().putString("verification_url", value).apply()
 
+    var browserDiagnostics: String?
+        get() = prefs.getString("browser_diagnostics", null)
+        set(value) = prefs.edit().putString("browser_diagnostics", value?.take(8_000)).apply()
+
     companion object {
         const val DEFAULT_INTERVAL_MINUTES = 360L
 

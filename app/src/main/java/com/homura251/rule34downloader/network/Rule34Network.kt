@@ -2,6 +2,8 @@ package com.homura251.rule34downloader.network
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.MutableContextWrapper
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -18,14 +20,16 @@ import java.util.concurrent.TimeUnit
 class Rule34Network private constructor(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = AppPreferences(appContext)
-    // Do not impersonate Chrome: both clients use the actual WebView UA.
-    val userAgent: String = WebSettings.getDefaultUserAgent(appContext)
+    val userAgent: String = BrowserIdentity.userAgent(WebSettings.getDefaultUserAgent(appContext))
     val cookies = WebViewCookieJar()
     var verificationUrl: String
         get() = preferences.verificationUrl?.takeIf(::isRule34UrlString) ?: VERIFICATION_URL
         private set(value) { preferences.verificationUrl = value }
-    private val pages by lazy { BrowserPageReader(appContext, ::createWebView) }
+    private val pages by lazy { BrowserPageReader(appContext, ::createWebView, reuseSession = true,
+        onDiagnostic = { preferences.browserDiagnostics = "$it\nUser-Agent: $userAgent" }) }
+    private val verifiedPages = VerifiedPageCache()
     private val media by lazy { BrowserMediaReader(appContext, ::createWebView) }
+    val browserDiagnostics: String get() = preferences.browserDiagnostics.orEmpty()
 
     val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -40,23 +44,61 @@ class Rule34Network private constructor(context: Context) {
         .build()
 
     @SuppressLint("SetJavaScriptEnabled")
-    fun createWebView(context: Context): WebView = WebView(context).apply {
-        settings.javaScriptEnabled = true
-        settings.domStorageEnabled = true
-        settings.userAgentString = userAgent
-        settings.allowFileAccess = false
-        settings.allowContentAccess = false
-        settings.mediaPlaybackRequiresUserGesture = true
-        settings.loadsImagesAutomatically = true
-        CookieManager.getInstance().setAcceptCookie(true)
-        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+    fun createWebView(context: Context): WebView {
+        val view = WebView(MutableContextWrapper(context))
+        try {
+            view.settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                cacheMode = WebSettings.LOAD_DEFAULT
+                allowFileAccess = false
+                allowContentAccess = false
+                mediaPlaybackRequiresUserGesture = true
+                loadsImagesAutomatically = true
+            }
+            BrowserIdentity.apply(view, userAgent)
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
+            // Detached readers still need a real viewport for page and challenge scripts.
+            val metrics = context.resources.displayMetrics
+            val width = metrics.widthPixels.coerceAtLeast(1)
+            val height = metrics.heightPixels.coerceAtLeast(1)
+            view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+            view.layout(0, 0, width, height)
+            return view
+        } catch (e: Exception) { view.destroy(); throw e }
     }
 
     fun htmlClient(http: OkHttpClient = client, checkActive: () -> Unit = {}): Rule34HtmlClient =
         Rule34HtmlClient(http, checkActive) { url, active ->
-            try { pages.read(url, active).also { cookies.flush() } }
+            active()
+            try { (verifiedPages.take(url) ?: pages.read(url, active)).also { active(); cookies.flush() } }
             catch (e: CloudflareChallengeException) { rememberVerificationUrl(url); throw e }
+            catch (e: BrowserReadException) { rememberVerificationUrl(url); throw e }
         }
+
+    fun completeVerification(url: String, snapshot: BrowserSnapshot, view: WebView) {
+        require(isRule34UrlString(snapshot.document.baseUri()) && BrowserPagePolicy.matchesRequest(url, snapshot.document.baseUri()) &&
+            BrowserPagePolicy.isReadable(snapshot.document, snapshot.contentType, snapshot.readyState))
+        verifiedPages.put(snapshot.document)
+        adoptVerifiedView(url, view)
+    }
+
+    fun adoptVerifiedView(url: String, view: WebView) {
+        require(isRule34UrlString(url))
+        cookies.flush()
+        pages.adoptVerifiedView(view)
+    }
+
+    fun verificationDiagnostic(url: String, snapshot: BrowserSnapshot?, reason: String, httpStatus: Int = 0,
+        challengeHeader: Boolean = false): String = BrowserReadDiagnostics(url).apply {
+        this.snapshot.set(snapshot)
+        httpError.set(httpStatus)
+        this.challengeHeader.set(challengeHeader)
+    }.report(reason) + "\nUser-Agent: $userAgent"
 
     fun openBrowserMedia(url: String, checkActive: () -> Unit, registerCancel: (() -> Unit) -> Closeable): MediaSource {
         try { return media.open(url, checkActive, registerCancel) }
