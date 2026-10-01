@@ -72,11 +72,11 @@ class AppEndToEndTest {
                         }, 650);</script>
                     """.trimIndent())
                     url.queryParameter("s") == "list" -> {
-                        lists.incrementAndGet()
+                        val listNumber = lists.incrementAndGet()
                         val contents = if (url.queryParameter("tags").orEmpty().contains("id:>42")) "" else
                             "<span class='thumb' id='s42'><a href='?page=post&amp;s=view&amp;id=42'>42</a></span>"
                         html("<title>Rule34 test</title><div class='image-list'>$contents</div>")
-                            .setHeadersDelay(1200, TimeUnit.MILLISECONDS)
+                            .setHeadersDelay(if (listNumber == 1) 5000 else 300, TimeUnit.MILLISECONDS)
                     }
                     else -> MockResponse().setResponseCode(404)
                 }
@@ -113,10 +113,14 @@ class AppEndToEndTest {
         waitFor("添加并下载")
         ui.onNodeWithText("添加并下载").performClick()
         waitFor("暂停")
-        ui.onNodeWithText("暂停").performClick()
+        ui.onNodeWithText("暂停").performScrollTo().assertIsEnabled().performClick()
+        ui.onNodeWithText("添加作者或图集").assertDoesNotExist()
+        ui.waitUntil(10_000) { database.getArtist(tag)?.paused == true }
         waitFor("继续")
         assertEquals(0, originals.get())
-        ui.onNodeWithText("继续").performClick()
+        ui.onNodeWithText("继续").performScrollTo().assertIsEnabled().performClick()
+        ui.onNodeWithText("添加作者或图集").assertDoesNotExist()
+        ui.waitUntil(10_000) { database.getArtist(tag)?.paused == false }
 
         ui.waitUntil(30_000) { database.getSavedRecords(tag).singleOrNull()?.status == DownloadStatus.DOWNLOADED && workFinished() }
         val record = database.getSavedRecords(tag).single()
@@ -158,7 +162,9 @@ class AppEndToEndTest {
         try { ui.waitUntil(20_000) { ui.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() } }
         catch (error: ComposeTimeoutException) {
             capture("failure.png")
-            val semantics = ui.onRoot().printToString()
+            val semantics = ui.onAllNodes(isRoot()).fetchSemanticsNodes().indices.joinToString("\n") {
+                ui.onAllNodes(isRoot())[it].printToString()
+            }
             writeTestText(context, "controlled", "failure-semantics.txt", semantics)
             throw AssertionError("Missing UI text: $text\n$semantics", error)
         }
