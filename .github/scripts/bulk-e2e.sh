@@ -45,6 +45,10 @@ adb shell am instrument -w -r \
 crash_process=$!
 crash_ready=false
 for (( attempt=0; attempt<120; attempt++ )); do
+  if ! kill -0 "$crash_process" 2>/dev/null; then
+    cat app/build/bulk-e2e-evidence/crash.log
+    exit 1
+  fi
   if adb shell "test -f '/sdcard/Download/Rule34 Downloader Test Evidence/bulk-$bulk_key/crash-ready.txt'"; then
     crash_ready=true
     break
