@@ -6,6 +6,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BrowserPagePolicyTest {
+    @Test fun canonicalFirstPageRedirectCanDropZeroOffsetButCannotChangeResults() {
+        val base = "https://rule34.xxx/index.php?page=post&s=list&tags=test"
+        assertTrue(BrowserPagePolicy.matchesRequest("$base&pid=0", base))
+        assertFalse(BrowserPagePolicy.matchesRequest("$base&pid=42", base))
+        assertFalse(BrowserPagePolicy.matchesRequest(base, "$base&pid=42"))
+        assertFalse(BrowserPagePolicy.matchesRequest(base, base.replace("rule34.xxx", "example.test")))
+        assertTrue(BrowserPagePolicy.matchesRequest(base, base.replace("rule34.xxx", "www.rule34.xxx")))
+    }
+    @Test fun passiveCloudflareScriptDoesNotHideReadablePostContent() {
+        val url = "https://rule34.xxx/index.php?page=post&s=view&id=42"
+        val html = "<script>window._cf_chl_opt={};</script><a href='/images/42/original.jpg'>Original image</a>"
+        assertTrue(BrowserPagePolicy.isReadable(Jsoup.parse(html, url)))
+        assertFalse(BrowserPagePolicy.isReadable(Jsoup.parse("<form id='challenge-form'></form>$html", url)))
+    }
     @Test fun attachmentVerificationDoesNotAcceptHtml() {
         assertTrue(BrowserPagePolicy.isDownloadable("video/webm"))
         assertTrue(BrowserPagePolicy.isDownloadable("application/octet-stream"))

@@ -205,14 +205,7 @@ class Rule34HtmlClient(
         }
     }
 
-    private fun looksLikeChallenge(document: Document): Boolean {
-        val title = document.title().trim()
-        val html = document.html()
-        return title.startsWith("Just a moment", ignoreCase = true) ||
-            title.equals("CAPTCHA", ignoreCase = true) ||
-            html.contains("_cf_chl_opt", ignoreCase = true) ||
-            document.selectFirst("#challenge-form, #cf-challenge-running") != null
-    }
+    private fun looksLikeChallenge(document: Document): Boolean = BrowserPagePolicy.isChallenge(document)
 
     private fun postUrl(postId: Long): String =
         "$SITE/index.php?page=post&s=view&id=$postId"

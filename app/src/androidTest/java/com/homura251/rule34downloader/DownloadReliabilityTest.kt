@@ -14,6 +14,7 @@ import com.homura251.rule34downloader.data.DownloadStatus
 import com.homura251.rule34downloader.data.Rule34Database
 import com.homura251.rule34downloader.network.BrowserMediaReader
 import com.homura251.rule34downloader.network.BrowserPageReader
+import com.homura251.rule34downloader.network.BrowserReadException
 import com.homura251.rule34downloader.network.CloudflareChallengeException
 import com.homura251.rule34downloader.network.Rule34Network
 import com.homura251.rule34downloader.network.Rule34HtmlClient
@@ -153,7 +154,7 @@ class DownloadReliabilityTest {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody("<div id='header'>Rule34</div><div id='tag-sidebar'></div>"))
             val url = server.url("/index.php?page=post&s=view&id=42").toString()
-            val error = assertThrows(RetryableApiException::class.java) { pages(1_500).read(url) }
+            val error = assertThrows(BrowserReadException::class.java) { pages(1_500).read(url) }
             assertTrue(error.message.orEmpty().contains(url))
         }
     }
