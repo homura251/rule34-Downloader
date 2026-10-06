@@ -19,7 +19,7 @@ class AutoSyncWorker(
         }
         Rule34Database.getInstance(applicationContext)
             .getArtistTags()
-            .forEach { tag -> SyncScheduler.enqueueArtistSync(applicationContext, tag) }
+            .forEach { tag -> SyncScheduler.enqueueArtistSync(applicationContext, tag, userInitiated = false) }
         Result.success()
     }
 }
