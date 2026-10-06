@@ -17,13 +17,13 @@ import java.util.concurrent.TimeUnit
 object SyncScheduler {
     private const val PERIODIC_SYNC_NAME = "rule34-periodic-discovery"
 
-    fun enqueueArtistSync(context: Context, artistTag: String, resume: Boolean = false, replace: Boolean = false) {
+    fun enqueueArtistSync(context: Context, artistTag: String, resume: Boolean = false, replace: Boolean = false, userInitiated: Boolean = false) {
         val database = Rule34Database.getInstance(context)
         if (resume && !database.resumeSync(artistTag)) return
         if (database.isPaused(artistTag)) return
         val preferences = AppPreferences(context)
         val request = OneTimeWorkRequestBuilder<ArtistSyncWorker>()
-            .setInputData(workDataOf(ArtistSyncWorker.KEY_ARTIST_TAG to artistTag))
+            .setInputData(workDataOf(\n                ArtistSyncWorker.KEY_ARTIST_TAG to artistTag,\n                ArtistSyncWorker.KEY_USER_INITIATED to userInitiated,\n            ))
             .setConstraints(networkConstraints(preferences.wifiOnly))
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(artistWorkTag(artistTag))
