@@ -188,19 +188,30 @@ private fun GalleryCard(post: GalleryPost, onOpen: () -> Unit) {
                 tint = Color.White,
             )
         }
-        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("#${post.postId}", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-            Text(
-                when (post.status) {
-                    DownloadStatus.DOWNLOADED -> "已下载"
-                    DownloadStatus.DOWNLOADING -> "下载中"
-                    DownloadStatus.PENDING -> "待下载"
-                    DownloadStatus.FAILED -> "失败"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = if (post.status == DownloadStatus.FAILED) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.primary,
-            )
+        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("#${post.postId}", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                Text(
+                    when (post.status) {
+                        DownloadStatus.DOWNLOADED -> "已下载"
+                        DownloadStatus.DOWNLOADING -> "下载中"
+                        DownloadStatus.PENDING -> "待下载"
+                        DownloadStatus.FAILED -> "失败"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (post.status == DownloadStatus.FAILED) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (post.status == DownloadStatus.FAILED && !post.error.isNullOrBlank()) {
+                Text(
+                    post.error,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
