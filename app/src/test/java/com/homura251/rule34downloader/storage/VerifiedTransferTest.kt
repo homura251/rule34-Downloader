@@ -30,7 +30,7 @@ class VerifiedTransferTest {
             VerifiedTransfer.copy(ByteArrayInputStream("partial".toByteArray()), ByteArrayOutputStream(), "", 7)
         }
         assertNull(SavedFileIdentity.verify(ByteArrayInputStream("partial".toByteArray()), ""))
-        assertFalse(SavedFileIdentity.parse("42.jpg")!!.matches(42, "", "jpg"))
+        assertFalse(SavedFileIdentity.parse("42.jpg")!!.matches(42, ""))
     }
     @Test fun pauseAfterLastChunkCannotCompleteAFile() {
         var paused = false
