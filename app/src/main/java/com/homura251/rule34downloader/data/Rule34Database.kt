@@ -281,13 +281,13 @@ class Rule34Database private constructor(context: Context) :
     }
 
     @Synchronized
-    fun insertDiscoveredPosts(tag: String, posts: List<Rule34Post>): Int {
+    fun upsertDiscoveredPosts(tag: String, posts: List<Rule34Post>): Int {
         if (posts.isEmpty()) return 0
         val db = writableDatabase
         var inserted = 0
         db.beginTransaction()
         try {
-            val statement = db.compileStatement(
+            val insert = db.compileStatement(
                 """
                 INSERT OR IGNORE INTO downloads(
                     artist_tag, post_id, file_url, md5, preview_url, status,
@@ -297,15 +297,30 @@ class Rule34Database private constructor(context: Context) :
             )
             val now = System.currentTimeMillis()
             posts.forEach { post ->
-                statement.clearBindings()
-                statement.bindString(1, tag)
-                statement.bindLong(2, post.id)
-                statement.bindString(3, post.fileUrl)
-                statement.bindString(4, post.md5)
-                if (post.previewUrl == null) statement.bindNull(5) else statement.bindString(5, post.previewUrl)
-                statement.bindString(6, DownloadStatus.PENDING.name)
-                statement.bindLong(7, now)
-                if (statement.executeInsert() != -1L) inserted++
+                insert.clearBindings()
+                insert.bindString(1, tag)
+                insert.bindLong(2, post.id)
+                insert.bindString(3, post.fileUrl)
+                insert.bindString(4, post.md5)
+                if (post.previewUrl == null) insert.bindNull(5) else insert.bindString(5, post.previewUrl)
+                insert.bindString(6, DownloadStatus.PENDING.name)
+                insert.bindLong(7, now)
+                if (insert.executeInsert() != -1L) {
+                    inserted++
+                } else {
+                    val values = ContentValues().apply {
+                        put("file_url", post.fileUrl)
+                        if (FileChecksum.normalize(post.md5) != null) put("md5", post.md5.lowercase())
+                        if (!post.previewUrl.isNullOrBlank()) put("preview_url", post.previewUrl)
+                        put("updated_at", now)
+                    }
+                    db.update(
+                        "downloads",
+                        values,
+                        "artist_tag = ? AND post_id = ?",
+                        arrayOf(tag, post.id.toString()),
+                    )
+                }
             }
             db.setTransactionSuccessful()
         } finally {
@@ -314,6 +329,10 @@ class Rule34Database private constructor(context: Context) :
         signalChanged()
         return inserted
     }
+
+    @Deprecated("Use upsertDiscoveredPosts so API metadata can repair older records.")
+    fun insertDiscoveredPosts(tag: String, posts: List<Rule34Post>): Int =
+        upsertDiscoveredPosts(tag, posts)
 
     fun getDownloadQueue(tag: String): List<DownloadRecord> = getSavedRecords(tag, unfinishedOnly = true)
 
