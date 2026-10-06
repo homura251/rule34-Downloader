@@ -5,20 +5,31 @@ import java.net.URI
 import java.security.MessageDigest
 
 data class SavedFileIdentity(val postId: Long, val md5: String?, val extension: String) {
-    fun matches(postId: Long, md5: String, extension: String): Boolean =
-        this.postId == postId && this.extension == extension.lowercase() &&
-            FileChecksum.normalize(md5) != null && (this.md5 == null || this.md5.equals(md5, true))
+    /**
+     * The filename is only an index hint. Content MD5 is the final authority, so
+     * renamed files and historical extension changes must still be eligible.
+     */
+    fun matches(postId: Long, expectedMd5: String): Boolean =
+        this.postId == postId && FileChecksum.normalize(expectedMd5) != null
 
     companion object {
-        private val NAME = Regex("^(\\d+)(?:_([a-fA-F0-9]{32}))?(?: \\(\\d+\\))?\\.([a-zA-Z0-9]{2,5})$")
+        private val POST_ID_PREFIX = Regex("^(\\d+)(?:[_ .(-].*)?$")
+        private val HASH = Regex("[a-fA-F0-9]{32}")
+
         fun parse(name: String): SavedFileIdentity? {
-            val match = NAME.matchEntire(name) ?: return null
+            val value = name.trim()
+            if (value.isEmpty()) return null
+            val dot = value.lastIndexOf('.')
+            val stem = if (dot > 0) value.substring(0, dot) else value
+            val match = POST_ID_PREFIX.matchEntire(stem) ?: return null
             val id = match.groupValues[1].toLongOrNull()?.takeIf { it > 0 } ?: return null
-            return SavedFileIdentity(id, match.groupValues[2].ifBlank { null }, match.groupValues[3].lowercase())
+            val extension = if (dot in 1 until value.lastIndex) value.substring(dot + 1).lowercase() else ""
+            return SavedFileIdentity(id, HASH.find(stem)?.value?.lowercase(), extension)
         }
+
         fun extension(url: String): String = runCatching {
             URI(url).path.substringAfterLast('.', "").lowercase()
-        }.getOrDefault("").takeIf { it.matches(Regex("[a-z0-9]{2,5}")) } ?: "bin"
+        }.getOrDefault("").takeIf { it.matches(Regex("[a-z0-9]{2,8}")) } ?: "bin"
 
         /** Return byte count only for non-empty files whose known checksum matches. */
         fun verify(input: InputStream, expectedMd5: String, checkActive: () -> Unit = {}): Long? {
