@@ -165,11 +165,18 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
 
             suspend fun saveAndDownload(post: Rule34Post) {
                 control.checkActive()
-                if (known.containsKey(post.id)) return
-                database.insertDiscoveredPosts(artistTag, listOf(post))
-                val record = DownloadRecord(artistTag, post.id, post.fileUrl, post.md5, DownloadStatus.PENDING, 0, 0)
+                database.upsertDiscoveredPosts(artistTag, listOf(post))
+                val previous = known[post.id]
+                val record = if (previous == null) {
+                    DownloadRecord(artistTag, post.id, post.fileUrl, post.md5, DownloadStatus.PENDING, 0, 0)
+                } else {
+                    previous.copy(
+                        fileUrl = post.fileUrl,
+                        md5 = if (com.homura251.rule34downloader.storage.FileChecksum.normalize(post.md5) != null) post.md5 else previous.md5,
+                    )
+                }
                 known[post.id] = record
-                downloadRecord(record)
+                if (previous == null || previous.status != DownloadStatus.DOWNLOADED) downloadRecord(record)
             }
 
             // Resume the persisted queue first, before another discovery scan.
@@ -178,7 +185,6 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                 var details = 0
                 for (member in pool.posts) {
                     control.checkActive()
-                    if (known.containsKey(member.id)) continue
                     if (details++ > 0) delay(services.detailDelayMs)
                     val post = api?.getPost(member.id) ?: html.getPostWithArtists(member.id).post
                     saveAndDownload(post.copy(previewUrl = member.previewUrl ?: post.previewUrl))
@@ -198,7 +204,6 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                     for (id in ids.filter { it > artist.lastSeenPostId }) {
                         control.checkActive()
                         maxSeen = maxOf(maxSeen, id)
-                        if (known.containsKey(id)) continue
                         val post = if (posts != null) posts.first { it.id == id } else {
                             if (details++ > 0) delay(services.detailDelayMs)
                             html.getPostWithArtists(id).post.let { it.copy(previewUrl = page!!.previews[id] ?: it.previewUrl) }
