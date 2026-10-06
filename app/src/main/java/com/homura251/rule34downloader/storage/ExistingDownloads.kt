@@ -91,7 +91,7 @@ class ExistingDownloads(private val context: Context, private val artistTag: Str
         }
         for (file in files[record.postId].orEmpty()) {
             checkActive()
-            if (!file.identity.matches(record.postId, expected, SavedFileIdentity.extension(record.fileUrl))) continue
+            if (!file.identity.matches(record.postId, expected)) continue
             val bytes = try {
                 resolver.openInputStream(file.uri)?.use { SavedFileIdentity.verify(it, expected, checkActive) }
             } catch (_: SecurityException) { null } catch (_: IOException) { null }
