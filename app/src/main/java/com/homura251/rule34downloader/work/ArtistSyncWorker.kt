@@ -85,13 +85,19 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                 database.replacePoolMembership(artistTag, pool.title, pool.posts)
             }
             val reuseChecked = mutableSetOf<Long>()
+            val reuseRejections = mutableMapOf<Long, String>()
             for (record in database.getSavedRecords(artistTag)) {
                 control.checkActive()
                 if (record.localUri == null && record.status != DownloadStatus.DOWNLOADED) continue
                 reuseChecked += record.postId
-                val saved = existing.find(record, control::checkActive)
-                if (saved != null) database.markDownloaded(artistTag, record.postId, saved.uri.toString(), saved.bytes, saved.verifiedMd5)
-                else database.invalidateSavedFile(artistTag, record.postId)
+                val lookup = existing.lookup(record, control::checkActive)
+                val saved = lookup.match
+                if (saved != null) {
+                    database.markDownloaded(artistTag, record.postId, saved.uri.toString(), saved.bytes, saved.verifiedMd5)
+                } else {
+                    lookup.rejection?.let { reuseRejections[record.postId] = it }
+                    database.invalidateSavedFile(artistTag, record.postId)
+                }
             }
             val known = database.getSavedRecords(artistTag).associateBy { it.postId }.toMutableMap()
             var completed = known.values.count { it.status == DownloadStatus.DOWNLOADED }
@@ -102,7 +108,11 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
             suspend fun downloadRecord(record: DownloadRecord) {
                 control.checkActive()
                 if (!attempted.add(record.postId)) return
-                val old = if (reuseChecked.add(record.postId)) existing.find(record, control::checkActive) else null
+                val old = if (reuseChecked.add(record.postId)) {
+                    val lookup = existing.lookup(record, control::checkActive)
+                    lookup.rejection?.let { reuseRejections[record.postId] = it }
+                    lookup.match
+                } else null
                 if (old != null) {
                     database.markDownloaded(artistTag, record.postId, old.uri.toString(), old.bytes, old.verifiedMd5)
                     known[record.postId] = record.copy(status = DownloadStatus.DOWNLOADED, localUri = old.uri.toString(),
@@ -138,7 +148,13 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                         is CloudflareChallengeException -> throw HtmlChallengeException(e.message.orEmpty(), e)
                         else -> {
                             failed++
-                            database.markFailed(artistTag, record.postId, e.message ?: e.javaClass.simpleName)
+                            val downloadError = e.message ?: e.javaClass.simpleName
+                            val reuseError = reuseRejections[record.postId]
+                            database.markFailed(
+                                artistTag,
+                                record.postId,
+                                if (reuseError == null) downloadError else "$reuseError；重新下载失败：$downloadError",
+                            )
                         }
                     }
                 }
