@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.homura251.rule34downloader.data.DownloadRecord
 import com.homura251.rule34downloader.data.DownloadStatus
 import com.homura251.rule34downloader.data.Rule34Database
+import com.homura251.rule34downloader.data.Rule34Post
 import com.homura251.rule34downloader.network.BrowserMediaReader
 import com.homura251.rule34downloader.network.BrowserPageReader
 import com.homura251.rule34downloader.network.BrowserReadException
@@ -281,6 +282,29 @@ class DownloadReliabilityTest {
             MediaStoreDownloader(context).cleanInterruptedFiles(tag)
             assertEquals(1, fileCount(tag)); assertEquals(1, fileCount(other))
         } finally { deleteFiles(tag); deleteFiles(other) }
+    }
+
+    @Test fun apiMetadataUpsertRepairsExistingBlankMd5WithoutResettingLocalState() {
+        val tag = "test_${UUID.randomUUID()}"
+        val database = Rule34Database.getInstance(context)
+        val hash = "5d41402abc4b2a76b9719d911017c592"
+        try {
+            assertTrue(database.addArtist(tag, 42))
+            database.upsertDiscoveredPosts(
+                tag,
+                listOf(Rule34Post(42, "https://wimg.rule34.xxx/images/42/file.jpg", "", emptyList())),
+            )
+            database.markFailed(tag, 42, "old failure")
+            database.upsertDiscoveredPosts(
+                tag,
+                listOf(Rule34Post(42, "https://wimg.rule34.xxx/images/42/$hash.jpg", hash, emptyList())),
+            )
+            val repaired = database.getSavedRecords(tag).single()
+            assertEquals(hash, repaired.md5)
+            assertEquals(DownloadStatus.FAILED, repaired.status)
+        } finally {
+            database.removeArtist(tag)
+        }
     }
 
     @Test fun upgradingRechecksOldCompletionsAndPreservesTheirUris() {
