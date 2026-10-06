@@ -95,6 +95,7 @@ data class GalleryPost(
     val previewUrl: String?,
     val localUri: String?,
     val status: DownloadStatus,
+    val error: String? = null,
 ) {
     val isVideo: Boolean
         get() = runCatching {
