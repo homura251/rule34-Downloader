@@ -1,6 +1,7 @@
 package com.homura251.rule34downloader.work
 
 import android.content.Context
+import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.homura251.rule34downloader.data.DownloadRecord
@@ -18,6 +19,7 @@ import com.homura251.rule34downloader.network.Rule34PoolClient
 import com.homura251.rule34downloader.data.Rule34Post
 import com.homura251.rule34downloader.storage.ExistingDownloads
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
+import com.homura251.rule34downloader.storage.RetryableDownloadException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
@@ -36,11 +38,12 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val artistTag = inputData.getString(KEY_ARTIST_TAG)?.trim().orEmpty()
         if (artistTag.isEmpty()) return@withContext Result.failure()
+        val userInitiated = inputData.getBoolean(KEY_USER_INITIATED, false)
         // Also serialize tags that sanitize to the same physical folder.
-        SyncControls.gate(MediaStoreDownloader.buildRelativePath(artistTag)).withLock { syncArtist(artistTag) }
+        SyncControls.gate(MediaStoreDownloader.buildRelativePath(artistTag)).withLock { syncArtist(artistTag, userInitiated) }
     }
 
-    private suspend fun syncArtist(artistTag: String): Result {
+    private suspend fun syncArtist(artistTag: String, userInitiated: Boolean): Result {
         currentCoroutineContext.ensureActive()
         val database = Rule34Database.getInstance(applicationContext)
         val artist = database.getArtist(artistTag) ?: return Result.success()
@@ -57,7 +60,17 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
         val notifications = DownloadNotifications(applicationContext)
         return try {
             if (!database.setSyncState(artistTag, SyncState.SYNCING)) return Result.success()
-            setForeground(notifications.foregroundInfo(artistTag, 0, 0))
+            if (userInitiated) {
+                try {
+                    setForeground(notifications.foregroundInfo(artistTag, 0, 0))
+                } catch (e: IllegalStateException) {
+                    val denied = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        e.javaClass.name == "android.app.ForegroundServiceStartNotAllowedException"
+                    if (!denied) throw e
+                    // WorkManager can still run this request as ordinary background work.
+                    // Do not fail the sync merely because Android denied FGS promotion.
+                }
+            }
             val services = servicesFactory.create(applicationContext, control)
             val html = services.html
             val api = services.api
@@ -71,9 +84,11 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                 control.checkActive()
                 database.replacePoolMembership(artistTag, pool.title, pool.posts)
             }
+            val reuseChecked = mutableSetOf<Long>()
             for (record in database.getSavedRecords(artistTag)) {
                 control.checkActive()
                 if (record.localUri == null && record.status != DownloadStatus.DOWNLOADED) continue
+                reuseChecked += record.postId
                 val saved = existing.find(record, control::checkActive)
                 if (saved != null) database.markDownloaded(artistTag, record.postId, saved.uri.toString(), saved.bytes, saved.verifiedMd5)
                 else database.invalidateSavedFile(artistTag, record.postId)
@@ -87,7 +102,7 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
             suspend fun downloadRecord(record: DownloadRecord) {
                 control.checkActive()
                 if (!attempted.add(record.postId)) return
-                val old = existing.find(record, control::checkActive)
+                val old = if (reuseChecked.add(record.postId)) existing.find(record, control::checkActive) else null
                 if (old != null) {
                     database.markDownloaded(artistTag, record.postId, old.uri.toString(), old.bytes, old.verifiedMd5)
                     known[record.postId] = record.copy(status = DownloadStatus.DOWNLOADED, localUri = old.uri.toString(),
@@ -118,12 +133,14 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                     downloaded++
                 } catch (e: Exception) {
                     control.checkActive()
-                    if (e is CloudflareChallengeException) {
-                        database.markFailed(artistTag, record.postId, e.message.orEmpty())
-                        throw HtmlChallengeException(e.message.orEmpty(), e)
+                    when (e) {
+                        is RetryableDownloadException -> throw e
+                        is CloudflareChallengeException -> throw HtmlChallengeException(e.message.orEmpty(), e)
+                        else -> {
+                            failed++
+                            database.markFailed(artistTag, record.postId, e.message ?: e.javaClass.simpleName)
+                        }
                     }
-                    failed++
-                    database.markFailed(artistTag, record.postId, e.message ?: e.javaClass.simpleName)
                 }
                 completed++
                 database.setSyncState(artistTag, SyncState.SYNCING)
@@ -212,6 +229,7 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
 
     companion object {
         const val KEY_ARTIST_TAG = "artist_tag"
+        const val KEY_USER_INITIATED = "user_initiated"
         private const val PROGRESS_UPDATE_INTERVAL_MS = 500L
         private const val MAX_FILE_RETRY_RUNS = 3
     }
