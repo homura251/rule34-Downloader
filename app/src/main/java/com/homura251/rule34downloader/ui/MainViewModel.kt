@@ -224,7 +224,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val added = database.addArtist(tag, postId, current.poolId, current.poolTitle)
         closeAddAuthor()
         if (added) {
-            SyncScheduler.enqueueArtistSync(getApplication(), tag)
+            SyncScheduler.enqueueArtistSync(getApplication(), tag, userInitiated = true)
             val mode = if (credentialsStore.isConfigured()) "API" else "匿名网页"
             eventsChannel.trySend(UiEvent.Message(if (current.poolId != null) {
                 "已添加图集 ${current.poolTitle}，开始整组同步。"
@@ -237,7 +237,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun syncArtist(tag: String) {
         viewModelScope.launch(Dispatchers.IO) {
             SyncScheduler.enqueueArtistSync(getApplication(), tag, resume = database.isPaused(tag),
-                replace = database.getSyncState(tag) == SyncState.ERROR)
+                replace = database.getSyncState(tag) == SyncState.ERROR, userInitiated = true)
         }
     }
 
