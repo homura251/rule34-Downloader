@@ -115,7 +115,7 @@ class Rule34Database private constructor(context: Context) :
             .use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
         val posts = db.rawQuery(
             """
-            SELECT d.artist_tag, d.post_id, d.file_url, $preview, d.local_uri, d.status
+            SELECT d.artist_tag, d.post_id, d.file_url, $preview, d.local_uri, d.status, d.error
             FROM downloads d$join WHERE d.artist_tag = ? ORDER BY $order LIMIT ?
             """.trimIndent(),
             arrayOf(tag, limit.coerceAtLeast(1).toString()),
@@ -128,6 +128,7 @@ class Rule34Database private constructor(context: Context) :
                     previewUrl = if (cursor.isNull(3)) null else cursor.getString(3),
                     localUri = if (cursor.isNull(4)) null else cursor.getString(4),
                     status = DownloadStatus.valueOf(cursor.getString(5)),
+                    error = if (cursor.isNull(6)) null else cursor.getString(6),
                 ))
             }
         }
