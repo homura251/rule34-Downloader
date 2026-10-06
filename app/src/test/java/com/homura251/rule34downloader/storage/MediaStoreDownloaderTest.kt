@@ -26,6 +26,24 @@ class MediaStoreDownloaderTest {
         response("video/webm").use { MediaStoreDownloader.requireMediaResponse(it) }
     }
 
+    @Test
+    fun transientMediaErrorsRequestBatchRetry() {
+        for (code in listOf(429, 500, 503)) {
+            val response = Response.Builder()
+                .request(Request.Builder().url("https://wimg.rule34.xxx/original.png").build())
+                .protocol(Protocol.HTTP_1_1)
+                .code(code)
+                .message("retry")
+                .body("temporary".toResponseBody("text/plain".toMediaType()))
+                .build()
+            response.use {
+                assertThrows(RetryableDownloadException::class.java) {
+                    MediaStoreDownloader.requireMediaResponse(it)
+                }
+            }
+        }
+    }
+
     private fun response(type: String): Response = Response.Builder()
         .request(Request.Builder().url("https://wimg.rule34.xxx/original.png").build())
         .protocol(Protocol.HTTP_1_1).code(200).message("OK")

@@ -224,8 +224,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val added = database.addArtist(tag, postId, current.poolId, current.poolTitle)
         closeAddAuthor()
         if (added) {
-            SyncScheduler.enqueueArtistSync(getApplication(), tag)
-            val mode = if (credentialsStore.isConfigured()) "API" else "匿名网页"
+            SyncScheduler.enqueueArtistSync(getApplication(), tag, userInitiated = true)
+            val mode = if (credentialsStore.isConfigured()) "API 元数据" else "匿名网页"
             eventsChannel.trySend(UiEvent.Message(if (current.poolId != null) {
                 "已添加图集 ${current.poolTitle}，开始整组同步。"
             } else "已添加 $tag，使用${mode}模式开始同步。"))
@@ -237,7 +237,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun syncArtist(tag: String) {
         viewModelScope.launch(Dispatchers.IO) {
             SyncScheduler.enqueueArtistSync(getApplication(), tag, resume = database.isPaused(tag),
-                replace = database.getSyncState(tag) == SyncState.ERROR)
+                replace = database.getSyncState(tag) == SyncState.ERROR, userInitiated = true)
         }
     }
 
@@ -334,7 +334,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         eventsChannel.trySend(
             UiEvent.Message(
                 if (credentialsStore.isConfigured()) {
-                    "设置已保存，优先使用 API 模式。"
+                    "设置已保存，帖子元数据优先使用 API；原文件仍走媒体下载链路。"
                 } else {
                     "设置已保存，当前使用匿名网页模式。"
                 },

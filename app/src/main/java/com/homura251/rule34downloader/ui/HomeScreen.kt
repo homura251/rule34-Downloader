@@ -168,7 +168,7 @@ private fun OptionalApiCard(onSettings: () -> Unit) {
                 )
             }
             Text(
-                "无需 API 也可以下载。配置自己的 User ID 与 API Key 后，会优先使用更快、更稳定的 API 模式。",
+                "配置 User ID 与 API Key 后，帖子列表、标签和 MD5 等元数据优先走 API；原文件仍使用独立的媒体下载链路。",
             )
             FilledTonalButton(onClick = onSettings) {
                 Text("可选：配置 API")

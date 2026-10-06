@@ -91,6 +91,13 @@ class MediaStoreDownloader(
             // Keep cancellation registered while an interceptor is reading a challenge.
             val response = registerCancel(call::cancel).use { call.execute() }
             try {
+                if (response.code == 403) {
+                    response.close()
+                    checkDownloadActive()
+                    return Rule34Network.get(context).openBrowserMedia(
+                        request.url.toString(), ::checkDownloadActive, registerCancel,
+                    )
+                }
                 requireMediaResponse(response)
                 val body = response.body ?: throw IOException("原文件下载返回了空响应。")
                 return com.homura251.rule34downloader.network.MediaSource(
@@ -155,6 +162,11 @@ class MediaStoreDownloader(
         }
 
         internal fun requireMediaResponse(response: Response) {
+            if (response.code == 429 || response.code >= 500) {
+                val retryAfter = response.header("Retry-After")?.trim()?.takeIf(String::isNotEmpty)
+                val suffix = retryAfter?.let { "，服务器建议 $it 后重试" }.orEmpty()
+                throw RetryableDownloadException("原文件服务器暂时不可用（HTTP ${response.code}$suffix）。", response.code)
+            }
             if (!response.isSuccessful) throw IOException("原文件下载失败（HTTP ${response.code}）")
             val type = response.body?.contentType()
             if (type?.subtype.equals("html", true) || type?.subtype.equals("xhtml+xml", true)) {
@@ -181,3 +193,10 @@ class MediaStoreDownloader(
         }
     }
 }
+
+
+class RetryableDownloadException(
+    message: String,
+    val statusCode: Int? = null,
+    cause: Throwable? = null,
+) : IOException(message, cause)
