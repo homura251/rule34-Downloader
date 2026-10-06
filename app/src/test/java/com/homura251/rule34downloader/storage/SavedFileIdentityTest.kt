@@ -14,12 +14,12 @@ class SavedFileIdentityTest {
     @Test fun rejectsUnrelatedFilesAndMismatchedPosts() {
         for (name in listOf("thumbnail.jpg", "42_thumb.jpg", "../42.jpg", "0.jpg", "999999999999999999999.jpg")) assertNull(SavedFileIdentity.parse(name))
         val file = SavedFileIdentity.parse("42_${hash}.jpg")!!
-        assertFalse(file.matches(43, hash, "jpg"))
-        assertFalse(file.matches(42, "00000000000000000000000000000000", "jpg"))
-        assertFalse(file.matches(42, hash, "png"))
+        assertFalse(file.matches(43, hash))
+        assertTrue(file.matches(42, "00000000000000000000000000000000"))
+        assertTrue(file.matches(42, hash))
     }
-    @Test fun olderFilesWithoutHashInNameCanBeCheckedByContent() {
-        assertTrue(SavedFileIdentity.parse("42.jpg")!!.matches(42, hash, "jpg"))
+    @Test fun acceptsRenamedAndExtensionChangedCandidatesForContentVerification() {\n        assertEquals(42L, SavedFileIdentity.parse("42_legacy-name.jpeg")!!.postId)\n        assertEquals(42L, SavedFileIdentity.parse("42 (2).PNG")!!.postId)\n        assertTrue(SavedFileIdentity.parse("42_5d41402abc4b2a76b9719d911017c592.jpg")!!.matches(42, hash))\n    }\n    @Test fun olderFilesWithoutHashInNameCanBeCheckedByContent() {
+        assertTrue(SavedFileIdentity.parse("42.jpg")!!.matches(42, hash))
         assertEquals(5L, SavedFileIdentity.verify(ByteArrayInputStream("hello".toByteArray()), hash))
     }
     @Test fun rejectsEmptyTruncatedAndCorruptedFiles() {
