@@ -201,6 +201,7 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                 var details = 0
                 for (member in pool.posts) {
                     control.checkActive()
+                    if (api == null && known.containsKey(member.id)) continue
                     if (details++ > 0) delay(services.detailDelayMs)
                     val post = api?.getPost(member.id) ?: html.getPostWithArtists(member.id).post
                     saveAndDownload(post.copy(previewUrl = member.previewUrl ?: post.previewUrl))
@@ -220,6 +221,7 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                     for (id in ids.filter { it > artist.lastSeenPostId }) {
                         control.checkActive()
                         maxSeen = maxOf(maxSeen, id)
+                        if (posts == null && known.containsKey(id)) continue
                         val post = if (posts != null) posts.first { it.id == id } else {
                             if (details++ > 0) delay(services.detailDelayMs)
                             html.getPostWithArtists(id).post.let { it.copy(previewUrl = page!!.previews[id] ?: it.previewUrl) }
