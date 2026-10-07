@@ -118,7 +118,7 @@ class ExistingDownloads(
 
     fun lookup(record: DownloadRecord, checkActive: () -> Unit): Lookup {
         if (indexedTree != AppPreferences(context).existingDownloadsTreeUri) refresh()
-        val expected = FileChecksum.expected(record.md5, record.fileUrl)
+        val expected = FileChecksum.expectedForReuse(record.md5, record.verifiedMd5, record.fileUrl)
             ?: return Lookup(null, "帖子 #${record.postId} 缺少可靠 MD5，无法校验旧文件")
 
         var candidateFound = false

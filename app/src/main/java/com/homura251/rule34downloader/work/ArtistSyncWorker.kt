@@ -18,6 +18,7 @@ import com.homura251.rule34downloader.network.Rule34HtmlClient
 import com.homura251.rule34downloader.network.Rule34PoolClient
 import com.homura251.rule34downloader.data.Rule34Post
 import com.homura251.rule34downloader.storage.ExistingDownloads
+import com.homura251.rule34downloader.storage.FileChecksum
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
 import com.homura251.rule34downloader.storage.RetryableDownloadException
 import kotlinx.coroutines.CancellationException
@@ -78,6 +79,21 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
             downloader.cleanInterruptedFiles(artistTag)
             database.resetInProgress(artistTag)
             val existing = ExistingDownloads(applicationContext, artistTag, control::checkActive)
+
+            // Older anonymous records can have an empty MD5 and are skipped by the
+            // normal "new posts only" cursor forever. Repair those records directly
+            // from the authenticated API before old-file verification or queue retry.
+            if (api != null) {
+                val stale = database.getSavedRecords(artistTag).filter {
+                    FileChecksum.expectedForReuse(it.md5, it.verifiedMd5, it.fileUrl) == null
+                }
+                for ((index, record) in stale.withIndex()) {
+                    control.checkActive()
+                    if (index > 0) delay(services.detailDelayMs)
+                    database.upsertDiscoveredPosts(artistTag, listOf(api.getPost(record.postId)))
+                }
+            }
+
             // Replace membership only after the complete pool scan succeeds.
             val pool = artist.poolId?.let { Rule34PoolClient(html, control::checkActive).getPool(it) }
             if (pool != null) {
@@ -165,11 +181,18 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
 
             suspend fun saveAndDownload(post: Rule34Post) {
                 control.checkActive()
-                if (known.containsKey(post.id)) return
-                database.insertDiscoveredPosts(artistTag, listOf(post))
-                val record = DownloadRecord(artistTag, post.id, post.fileUrl, post.md5, DownloadStatus.PENDING, 0, 0)
+                database.upsertDiscoveredPosts(artistTag, listOf(post))
+                val previous = known[post.id]
+                val record = if (previous == null) {
+                    DownloadRecord(artistTag, post.id, post.fileUrl, post.md5, DownloadStatus.PENDING, 0, 0)
+                } else {
+                    previous.copy(
+                        fileUrl = post.fileUrl,
+                        md5 = if (FileChecksum.normalize(post.md5) != null) post.md5 else previous.md5,
+                    )
+                }
                 known[post.id] = record
-                downloadRecord(record)
+                if (previous == null || previous.status != DownloadStatus.DOWNLOADED) downloadRecord(record)
             }
 
             // Resume the persisted queue first, before another discovery scan.
@@ -178,7 +201,7 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                 var details = 0
                 for (member in pool.posts) {
                     control.checkActive()
-                    if (known.containsKey(member.id)) continue
+                    if (api == null && known.containsKey(member.id)) continue
                     if (details++ > 0) delay(services.detailDelayMs)
                     val post = api?.getPost(member.id) ?: html.getPostWithArtists(member.id).post
                     saveAndDownload(post.copy(previewUrl = member.previewUrl ?: post.previewUrl))
@@ -198,7 +221,7 @@ class ArtistSyncWorker internal constructor(appContext: Context, workerParams: W
                     for (id in ids.filter { it > artist.lastSeenPostId }) {
                         control.checkActive()
                         maxSeen = maxOf(maxSeen, id)
-                        if (known.containsKey(id)) continue
+                        if (posts == null && known.containsKey(id)) continue
                         val post = if (posts != null) posts.first { it.id == id } else {
                             if (details++ > 0) delay(services.detailDelayMs)
                             html.getPostWithArtists(id).post.let { it.copy(previewUrl = page!!.previews[id] ?: it.previewUrl) }

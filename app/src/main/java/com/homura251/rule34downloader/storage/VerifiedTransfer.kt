@@ -14,6 +14,9 @@ object FileChecksum {
         val name = URI(fileUrl).path.substringAfterLast('/')
         normalize(name.substringBeforeLast('.', name))
     }.getOrNull()
+
+    fun expectedForReuse(md5: String, verifiedMd5: String?, fileUrl: String): String? =
+        normalize(md5) ?: normalize(verifiedMd5.orEmpty()) ?: expected("", fileUrl)
 }
 
 object VerifiedTransfer {
