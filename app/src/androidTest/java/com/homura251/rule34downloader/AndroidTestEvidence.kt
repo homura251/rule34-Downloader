@@ -21,4 +21,4 @@ internal fun writeTestEvidence(context: Context, scope: String, name: String, mi
 }
 
 internal fun writeTestText(context: Context, scope: String, name: String, text: String) =
-    writeTestEvidence(context, scope, name, "text/plain") { it.write(text.toByteArray()) }
+    writeTestEvidence(context, scope, name, if (name.endsWith(".json", true)) "application/json" else "text/plain") { it.write(text.toByteArray()) }
