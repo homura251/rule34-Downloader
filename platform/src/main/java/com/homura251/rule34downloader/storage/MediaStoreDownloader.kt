@@ -80,6 +80,8 @@ class MediaStoreDownloader(
         } catch (e: Exception) {
             // This URI was created by this attempt; reused old files are never deleted.
             if (!published) insertedUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            if (e is SecurityException || (e is IOException && e !is FileIntegrityException && e !is InterruptedIOException))
+                throw SourceFailure(FailureKind.FILE, "文件读写失败，请检查存储空间与系统授权。")
             throw e
         }
     }

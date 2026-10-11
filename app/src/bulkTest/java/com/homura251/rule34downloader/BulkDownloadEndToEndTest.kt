@@ -200,9 +200,15 @@ class BulkDownloadEndToEndTest {
         val previous = read { graph.settings.snapshot() }.existingDownloadsTreeUri
         ui.onNodeWithTag("nav-settings").performClick()
         waitUiTag("settings-list")
+        // The previous folder confirmation can cover this button on a 320dp display.
+        // Native waits do not advance the Compose clock used by the snackbar timeout.
+        ui.mainClock.advanceTimeBy(6_000)
+        ui.waitUntil(10_000) {
+            ui.onAllNodesWithText("旧下载目录已关联；同步时会校验并复用已有文件。").fetchSemanticsNodes().isEmpty()
+        }
         ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("link-downloads"))
         ui.onNodeWithTag("link-downloads").performClick()
-        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("(?i)use this folder"))), 15_000))
+        assertTrue("Native SAF picker must open after clicking the folder button", device.wait(Until.hasObject(By.text(Pattern.compile("(?i)use this folder"))), 15_000))
         val alreadyChild = previous?.let { DocumentsContract.getTreeDocumentId(Uri.parse(it)).endsWith("/$tag") } == true
         if (child && !alreadyChild) device.wait(Until.findObject(By.text(tag)), 10_000)?.click() ?: error("Subscription folder missing in system picker")
         val use = device.wait(Until.findObject(By.text(Pattern.compile("(?i)use this folder"))), 10_000) ?: error("No folder confirmation")

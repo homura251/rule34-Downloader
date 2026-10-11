@@ -71,16 +71,24 @@ class ApiAppEndToEndTest {
         read { graph.account.clear(); graph.background.authenticationChanged() }
         ui.waitUntil(10_000) { ui.onAllNodesWithText("连接 API 后开始同步").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(saved.map { it.localUri }, read { graph.library.records(origin.tag) }.map { it.localUri })
+        ui.onNodeWithTag("nav-subscriptions").performClick()
+        ui.waitUntil(10_000) { ui.onAllNodes(hasTestTag("sync-${origin.tag}") and hasText("暂停")).fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("sync-${origin.tag}").performScrollTo().performClick()
+        wait { read { graph.library.getCollection(origin.tag) }?.syncState == SyncState.PAUSED }
         ui.onNodeWithTag("nav-settings").performClick()
         ui.onNodeWithTag("verify-api").assertExists()
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("api-user-id").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("api-user-id").performTextReplacement("42")
         ui.onNodeWithTag("api-key").performTextInput("fixture-key")
         ui.onNodeWithTag("verify-api").performScrollTo().performClick()
-        wait { read { graph.library.getCollection(origin.tag) }?.syncState == SyncState.COMPLETE && graph.account.state.value.canUseApi }
+        wait { graph.account.state.value.canUseApi }
+        assertEquals(SyncState.PAUSED, read { graph.library.getCollection(origin.tag) }!!.syncState)
+        ui.onNodeWithTag("nav-tasks").performClick()
+        ui.onNodeWithText("继续暂停任务").performClick()
+        wait { read { graph.library.getCollection(origin.tag) }?.syncState == SyncState.COMPLETE }
         assertEquals(4, origin.totalOriginals())
         assertEquals(saved.map { it.localUri }, read { graph.library.records(origin.tag) }.map { it.localUri })
-        writeTestText(app, "controlled", "api-ui-result.txt", "PASS: credential gate, real API and media HTTP, four tabs, pause/resume, readback MD5, local gallery after clearing credentials, automatic task recovery after revalidation; originals=4; authentication leaks=0")
+        writeTestText(app, "controlled", "api-ui-result.txt", "PASS: credential gate, real API and media HTTP, four tabs, pause/resume, readback MD5, local gallery and pause after clearing credentials, pause intent preserved after revalidation, manual resume reused saved files; originals=4; authentication leaks=0")
     }
     private fun wait(timeout: Long = 30_000, predicate: () -> Boolean) {
         val until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeout)

@@ -4,6 +4,7 @@ import com.homura251.rule34downloader.domain.*
 import com.homura251.rule34downloader.work.SyncControl
 import kotlinx.coroutines.*
 import okhttp3.*
+import java.io.FilterInputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -26,7 +27,15 @@ class HttpMediaTransport(private val client: OkHttpClient, private val control: 
             try {
                 requireResponse(response)
                 val body = response.body ?: throw SourceFailure(FailureKind.FILE, "原文件响应为空。")
-                MediaStream(body.byteStream(), body.contentType()?.toString(), body.contentLength()) {
+                val input = object : FilterInputStream(body.byteStream()) {
+                    private fun readChecked(block: () -> Int): Int = try { block() } catch (_: IOException) {
+                        control.checkActive()
+                        throw SourceFailure(FailureKind.NETWORK, "原文件传输中断，等待重试。")
+                    }
+                    override fun read(): Int = readChecked { `in`.read() }
+                    override fun read(buffer: ByteArray, offset: Int, length: Int): Int = readChecked { `in`.read(buffer, offset, length) }
+                }
+                MediaStream(input, body.contentType()?.toString(), body.contentLength()) {
                     try { response.close() } finally { registration.close() }
                 }
             } catch (e: Exception) { response.close(); throw e }

@@ -59,9 +59,8 @@ class SyncEngine(
                 repository.markDownloading(id, runId, record.postId, 0)
                 observer.progress(completed, total, record.postId)
                 try {
-                    val saved = transferWithProgress(id, runId, record)
-                    // Persist a published, verified URI even when pause arrives at the publication boundary.
-                    withContext(NonCancellable) { repository.markDownloaded(id, runId, record.postId, saved) }
+                    // The publication callback already persists the verified URI before transfer returns.
+                    transferWithProgress(id, runId, record)
                     downloaded++
                     completed++
                 } catch (e: CancellationException) { throw e }

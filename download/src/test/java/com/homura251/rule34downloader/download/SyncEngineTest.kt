@@ -135,6 +135,15 @@ class SyncEngineTest {
         assertEquals("content://old/1", repo.rows.getValue(1).localUri)
         assertTrue(transferred.isEmpty())
     }
+    @Test fun mediaNetworkFailureDoesNotConsumePermanentFileAttempts() = runTest {
+        repo.seed(post(1))
+        transfer = { _, _ -> throw SourceFailure(FailureKind.NETWORK, "transfer disconnected") }
+        assertEquals(SyncOutcome.Retry(30_000), engine().run("artist"))
+        assertEquals(SyncState.WAITING_NETWORK, repo.collection.syncState)
+        assertEquals(0, repo.rows.getValue(1).attempts)
+        assertEquals(DownloadStatus.PENDING, repo.rows.getValue(1).status)
+        assertNull(repo.rows.getValue(1).localUri)
+    }
     @Test fun pausedAndArchivedCollectionsNeverUseCatalog() = runTest {
         repo.collection = repo.collection.copy(paused = true)
         assertEquals(SyncOutcome.Skipped, engine().run("artist"))
