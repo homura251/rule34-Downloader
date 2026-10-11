@@ -3,7 +3,6 @@ package com.homura251.rule34downloader.storage
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
-import android.os.Environment
 import android.os.Build
 import android.os.Bundle
 import android.content.ContentResolver
@@ -16,13 +15,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.NonCancellable
 import com.homura251.rule34downloader.network.HttpMediaTransport
-import okhttp3.Request
 import okhttp3.Response
-import okhttp3.OkHttpClient
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.URI
-import java.util.concurrent.TimeUnit
 
 class MediaStoreDownloader(
     private val context: Context,
@@ -149,23 +145,8 @@ class MediaStoreDownloader(
 
         internal fun requireMediaResponse(response: Response) = HttpMediaTransport.requireResponse(response)
 
-        fun buildRelativePath(artistTag: String): String =
-            Environment.DIRECTORY_DOWNLOADS + "/Rule34 Downloader/" + sanitizeFolderName(artistTag) + "/"
-
-        fun sanitizeFolderName(value: String): String {
-            val sanitized = buildString(value.length) {
-                value.forEach { char ->
-                    append(
-                        when {
-                            char.code < 32 -> '_'
-                            char in listOf('\\', '/', ':', '*', '?', '"', '<', '>', '|') -> '_'
-                            else -> char
-                        },
-                    )
-                }
-            }.trim().trim('.', ' ')
-            return sanitized.ifBlank { "unknown_artist" }.take(80)
-        }
+        fun buildRelativePath(artistTag: String): String = DirectoryLayout.relativePath(artistTag)
+        fun sanitizeFolderName(value: String): String = DirectoryLayout.folderName(value)
     }
 }
 

@@ -7,6 +7,9 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
+import androidx.test.uiautomator.UiDevice
 import androidx.work.WorkManager
 import com.homura251.rule34downloader.domain.*
 import kotlinx.coroutines.*
@@ -38,8 +41,14 @@ class ApiAppEndToEndTest {
         ui.onNodeWithText("继续", substring = false).performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithText("订阅并同步").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithText("订阅并同步").performClick()
+        // Exercise the actual Android notification permission prompt before returning to Compose.
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val allow = device.wait(Until.findObject(By.res("com.google.android.permissioncontroller", "permission_allow_button")), 10_000)
+            ?: device.wait(Until.findObject(By.text("Allow")), 2_000)
+            ?: error("Notification permission prompt did not appear")
+        allow.click()
         wait { read { graph.library.records(origin.tag) }.any { it.postId == 1L && it.bytesDownloaded > 0 } }
-        ui.onNodeWithTag("sync-${origin.tag}").performClick()
+        ui.onNodeWithTag("sync-${origin.tag}").performScrollTo().performClick()
         wait { read { graph.library.getCollection(origin.tag) }?.syncState == SyncState.PAUSED }
         assertEquals(3L, read { graph.library.getCollection(origin.tag) }!!.lastSeenPostId)
         assertTrue(read { graph.library.getCollection(origin.tag) }!!.paused)
@@ -64,7 +73,14 @@ class ApiAppEndToEndTest {
         assertEquals(saved.map { it.localUri }, read { graph.library.records(origin.tag) }.map { it.localUri })
         ui.onNodeWithTag("nav-settings").performClick()
         ui.onNodeWithTag("verify-api").assertExists()
-        writeTestText(app, "controlled", "api-ui-result.txt", "PASS: credential gate, real API and media HTTP, four tabs, pause/resume, readback MD5, local gallery after clearing credentials; originals=4; authentication leaks=0")
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("api-user-id").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("api-user-id").performTextReplacement("42")
+        ui.onNodeWithTag("api-key").performTextInput("fixture-key")
+        ui.onNodeWithTag("verify-api").performScrollTo().performClick()
+        wait { read { graph.library.getCollection(origin.tag) }?.syncState == SyncState.COMPLETE && graph.account.state.value.canUseApi }
+        assertEquals(4, origin.totalOriginals())
+        assertEquals(saved.map { it.localUri }, read { graph.library.records(origin.tag) }.map { it.localUri })
+        writeTestText(app, "controlled", "api-ui-result.txt", "PASS: credential gate, real API and media HTTP, four tabs, pause/resume, readback MD5, local gallery after clearing credentials, automatic task recovery after revalidation; originals=4; authentication leaks=0")
     }
     private fun wait(timeout: Long = 30_000, predicate: () -> Boolean) {
         val until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeout)

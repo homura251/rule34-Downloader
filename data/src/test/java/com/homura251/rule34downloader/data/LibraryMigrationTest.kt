@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.homura251.rule34downloader.data.room.LibraryDatabase
 import com.homura251.rule34downloader.domain.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,6 +19,44 @@ import org.robolectric.annotation.Config
 class LibraryMigrationTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val hash = "0123456789abcdef0123456789abcdef"
+
+    @Test fun legacyDownloadSettingsMigrateAndFolderSelectionPersists() = runBlocking {
+        val legacy = context.getSharedPreferences("app_preferences", Context.MODE_PRIVATE)
+        legacy.edit().putBoolean("auto_sync_enabled", true).putLong("sync_interval_minutes", 60)
+            .putBoolean("wifi_only", true).putString("existing_downloads_tree_uri", "content://legacy/tree/root").commit()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val repo = DataStoreSettingsRepository(context, scope)
+            assertEquals(AppSettings(true, 60, true, "content://legacy/tree/root"), repo.snapshot())
+            repo.save(repo.snapshot().copy(syncIntervalMinutes = 1, existingDownloadsTreeUri = "content://new/tree/child"))
+            assertEquals(AppSettings(true, 15, true, "content://new/tree/child"), repo.snapshot())
+            assertFalse(legacy.contains("existing_downloads_tree_uri"))
+        } finally { scope.cancel() }
+    }
+
+    @Test fun galleryFiltersPageDistinctPostsAndPreferLocalCompletion() = runBlocking {
+        val name = "gallery.db"; context.deleteDatabase(name)
+        val db = LibraryDatabase.open(context, name)
+        try {
+            val repo = RoomLibraryRepository(db)
+            for (id in listOf("one", "two")) { repo.addCollection(id, 0); repo.beginRun(id, id) }
+            val posts = listOf(post(1), post(2).copy(fileUrl = "https://wimg.rule34.xxx/movie.M4V?token=fixture"), post(3))
+            repo.savePage("one", "one", posts, ScanCheckpoint(0, 1, 3))
+            repo.savePage("two", "two", listOf(post(1)), ScanCheckpoint(0, 1, 1))
+            repo.markFailed("one", "one", 1, "bad copy")
+            repo.markDownloaded("two", "two", 1, SavedFile("content://local/two/1", 10, hash))
+            val page = repo.gallery(GalleryQuery(), 0, 2)
+            assertEquals(3, page.totalCount)
+            assertEquals(listOf(3L, 2L), page.posts.map { it.postId })
+            val next = repo.gallery(GalleryQuery(), 2, 2).posts.single()
+            assertEquals(DownloadStatus.DOWNLOADED, next.status)
+            assertEquals("content://local/two/1", next.localUri)
+            assertNull(next.error)
+            assertEquals(listOf(2L), repo.gallery(GalleryQuery(filter = GalleryFilter.VIDEOS), 0, 60).posts.map { it.postId })
+            assertEquals(listOf(3L, 1L), repo.gallery(GalleryQuery(filter = GalleryFilter.IMAGES), 0, 60).posts.map { it.postId })
+            assertEquals(listOf(1L), repo.gallery(GalleryQuery(filter = GalleryFilter.DOWNLOADED), 0, 60).posts.map { it.postId })
+        } finally { db.close(); context.deleteDatabase(name) }
+    }
 
     @Test fun allFiveLegacyVersionsPreserveUrisPauseIntentAndPoolOrdering() = runBlocking {
         for (version in 1..5) {

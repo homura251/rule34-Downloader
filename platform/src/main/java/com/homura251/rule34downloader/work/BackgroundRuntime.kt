@@ -107,8 +107,14 @@ class BackgroundRuntime(
             collection.syncState in setOf(SyncState.ERROR, SyncState.BLOCKED, SyncState.WAITING_RETRY, SyncState.WAITING_NETWORK)) sync(collection.tag)
     }
     override suspend fun authenticationChanged() {
+        val collections = repository.getCollections()
         for (id in SyncControls.activeTags()) SyncControls.pause(id)
-        withContext(Dispatchers.IO) { manager.cancelAllWorkByTag(SYNC_TAG).result.get(10, TimeUnit.SECONDS) }
+        withContext(Dispatchers.IO) {
+            // Pre-2.0 work has the same unique name but does not carry the new group tag.
+            val cancellations = collections.map { manager.cancelUniqueWork(workName(it.tag)) }
+            manager.cancelAllWorkByTag(SYNC_TAG).result.get(10, TimeUnit.SECONDS)
+            cancellations.forEach { it.result.get(10, TimeUnit.SECONDS) }
+        }
         repository.suspendForAuthentication()
         updateSchedule()
         if (account.state.value.canUseApi) for (collection in repository.getCollections())

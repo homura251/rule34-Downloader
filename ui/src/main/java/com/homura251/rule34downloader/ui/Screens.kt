@@ -331,7 +331,7 @@ fun AddSubscriptionDialog(viewModel: AddSubscriptionViewModel, onDismiss: () -> 
                         Text(candidate.name, Modifier.weight(1f))
                     }
                 }
-                if (state.selected != null) Text("目录：Download/Rule34 Downloader/${state.selected}/", style = MaterialTheme.typography.bodySmall)
+                if (state.selected != null) Text("目录：${com.homura251.rule34downloader.domain.files.DirectoryLayout.relativePath(state.selected.orEmpty())}", style = MaterialTheme.typography.bodySmall)
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },

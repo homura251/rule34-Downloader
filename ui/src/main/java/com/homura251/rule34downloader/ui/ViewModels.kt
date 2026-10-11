@@ -119,8 +119,12 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
                 val key = draft.apiKey.trim().ifEmpty { old?.takeIf { it.userId == userId }?.apiKey.orEmpty() }
                 val credentials = ApiCredentials(userId, key)
                 services.catalog.validate(credentials)
-                services.account.save(credentials)
-                services.tasks.authenticationChanged()
+                ensureActive()
+                // Once committed, rebinding work must survive navigation away from this screen.
+                withContext(NonCancellable) {
+                    services.account.save(credentials)
+                    services.tasks.authenticationChanged()
+                }
                 mutable.update { it.copy(validating = false, apiKey = "") }
                 notify("API 验证成功，联网任务已恢复。")
             } catch (e: CancellationException) { throw e }
@@ -128,7 +132,7 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
         }
     }
     fun clearAccount() = action {
-        services.account.clear(); services.tasks.authenticationChanged()
+        withContext(NonCancellable) { services.account.clear(); services.tasks.authenticationChanged() }
         mutable.update { it.copy(userId = "", apiKey = "", accountError = null) }
         notify("API 凭据已清除，可以继续浏览本地作品。")
     }

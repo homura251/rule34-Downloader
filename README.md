@@ -88,4 +88,4 @@ Actions artifacts 保存 APK、测试报告、截图和逐阶段实际文件校�
 
 `Signed Android Release` 工作流验证并构建固定签名 Release。手动运行时可关闭 `publish_release`，仅生成 artifact；在 main 上提交信息含 `[release]` 时会发布。普通 CI 用临时密钥验证压缩后的 Release 构建，该临时 Release 不会上传或发布。
 
-本地固定签名构建读取四项环境变量：`ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。四项齐全后运行 `./gradlew assembleRelease`。签名密钥与已安装版本不一致时不能覆盖安装；卸载会清除应用数据库、凭据和目录授权，公共下载文件保留。
+本地固定签名构建读取四项环境变量：`ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。四项齐全后 Debug 与 Release 都使用该密钥，可运行 `./gradlew assembleDebug assembleRelease`；未配置时 Debug 使用 SDK 调试密钥。签名密钥与已安装版本不一致时不能覆盖安装；卸载会清除应用数据库、凭据和目录授权，公共下载文件保留。

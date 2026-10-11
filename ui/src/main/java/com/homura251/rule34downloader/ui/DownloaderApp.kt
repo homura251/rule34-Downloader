@@ -66,9 +66,6 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
             launchSingleTop = true; restoreState = true
         }
     }
-    LaunchedEffect(account.status, route) {
-        if (account.canUseApi && route == "setup") navigation.navigate("subscriptions") { popUpTo("setup") { inclusive = true } }
-    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         val setup = route == "setup"
@@ -96,6 +93,11 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
                     NavHost(navigation, startDestination = start, modifier = Modifier.weight(1f)) {
                         composable("setup") {
                             val model: SettingsViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { SettingsViewModel(services) } } })
+                            val setupState by model.state.collectAsStateWithLifecycle()
+                            LaunchedEffect(account.canUseApi, setupState.validating, setupState.accountError) {
+                                if (account.canUseApi && !setupState.validating && setupState.accountError == null)
+                                    navigation.navigate("subscriptions") { popUpTo("setup") { inclusive = true } }
+                            }
                             SettingsScreen(model, snackbar, {}, onRequestNotificationPermission, setup = true, onBrowseOffline = {
                                 navigation.navigate("subscriptions") { popUpTo("setup") { inclusive = true } }
                             })
