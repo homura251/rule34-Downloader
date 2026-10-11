@@ -22,7 +22,7 @@ jobs:
   signed-release:
     if: >-
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]'))
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -30,50 +30,32 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Restore signing key
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          python3 - <<'PY'
-          import base64
-          import os
-          from pathlib import Path
-
-          names = ('ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD')
-          missing = [name for name in names if not os.environ.get(name, '').strip()]
-          if missing:
-              raise SystemExit('Missing repository Actions secrets: ' + ', '.join(missing))
-          try:
-              data = base64.b64decode(''.join(os.environ['ANDROID_KEYSTORE_BASE64'].split()), validate=True)
-          except ValueError:
-              raise SystemExit('ANDROID_KEYSTORE_BASE64 must contain the Base64-encoded keystore') from None
-          if not data:
-              raise SystemExit('The signing keystore is empty')
-          path = Path(os.environ['RUNNER_TEMP']) / 'rule34-release.jks'
-          path.touch(mode=0o600)
-          path.write_bytes(data)
-          PY
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+      - name: Configure fixed signing key
+        uses: ./.github/actions/setup-signing
+        with:
+          keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
       - name: Unit tests and signed release build
-        env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/rule34-release.jks
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew --stacktrace --no-configuration-cache testDebugUnitTest assembleRelease
       - name: Verify APK signature
         run: |
           apksigner="$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)"
           "$apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+      - name: Remove signing key
+        if: always()
+        run: |
+          if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
+            rm -f "$ANDROID_KEYSTORE_PATH"
+          fi
       - name: Prepare versioned release APK
         id: release
         run: |
@@ -98,7 +80,9 @@ jobs:
           path: ${{ steps.release.outputs.apk }}
           if-no-files-found: error
       - name: Publish signed GitHub Release
-        if: github.event_name == 'push' || inputs.publish_release
+        if: >-
+          (github.event_name == 'push' && contains(github.event.head_commit.message, '[release]')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -114,6 +98,3 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "rule34-Downloader v$RELEASE_VERSION" \
             --generate-notes
-      - name: Remove signing key
-        if: always()
-        run: rm -f "$RUNNER_TEMP/rule34-release.jks"

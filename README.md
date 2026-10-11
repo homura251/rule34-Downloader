@@ -114,11 +114,11 @@ Rule34 的 DAPI 当前要求 `user_id` 与 `api_key`。App 在未配置凭据时
 ./gradlew testDebugUnitTest assembleDebug
 ```
 
-调试 APK：`app/build/outputs/apk/debug/app-debug.apk`。
+调试 APK：`app/build/outputs/apk/debug/app-debug.apk`。配置下面的四项 Actions Secrets 后，`main` 上所有 CI 任务生成的 Debug、Release 及 instrumentation APK 都使用同一固定密钥签名，方便后续覆盖安装。
 
-推送到 `main` 且提交信息包含 `[release-debug]` 时，构建与必需的 Android 回归测试全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`：当前为 `debug-v1.5.4`，附件为 `rule34-Downloader-v1.5.4-debug.apk`。其他版本的 Release 保留。
+推送到 `main` 且提交信息包含 `[release-debug]` 时，构建与必需的 Android 回归测试全部通过后自动发布/刷新对应版本的 GitHub prerelease。版本号读取 `app/build.gradle.kts` 的 `versionName`，tag 为 `debug-v<versionName>`，附件为 `rule34-Downloader-v<versionName>-debug.apk`。其他版本的 Release 保留。
 
-普通 main 提交和 PR 会运行 JVM 单元测试及 Android 35 上的真实 WebView、流式传输、暂停、MediaStore、数据库升级和批量端到端回归测试，构建并上传调试 APK artifact，并使用临时测试密钥验证 Release 构建与签名；临时密钥签出的 Release APK 不会上传或发布。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
+普通 main 提交和 PR 会运行 JVM 单元测试及 Android 35 上的真实 WebView、流式传输、暂停、MediaStore、数据库升级和批量端到端回归测试，构建并上传调试 APK artifact，并验证 Debug 和 Release APK 的签名。`main` 使用固定密钥，且每次推送都会额外上传固定签名的 Release APK artifact。PR 的构建验证使用临时测试密钥，端到端测试使用默认调试签名，不读取正式密钥，也不发布 Release；PR 产物仅用于验证，不能覆盖固定签名版。发布调试版本时，应在最终合入 main 的提交标题或内容中保留 `[release-debug]`。
 
 ### Android CLI 与端到端测试
 
@@ -145,9 +145,11 @@ CI 安装 Google 官方 Android CLI，在 Android 35 模拟器上安装并启动
 
 真实原站检查只保存验证结果，不保留测试下载的文件。受控回归直接使用测试中的 HTTP 服务，不在正式应用中提供测试站点入口。
 
-## 固定密钥签名的 Release APK
+## CI 与 Release 的固定密钥签名
 
-`Signed Android Release` 工作流使用你保存在 GitHub Actions Secrets 中的固定密钥生成 Release APK。它会运行项目现有的单元测试、启用代码和资源压缩，并通过 `apksigner verify` 检查签名后上传 APK。调试构建仍使用默认调试签名。
+`Android CI` 和 `Signed Android Release` 工作流共用你保存在 GitHub Actions Secrets 中的固定密钥。每次推送到 `main` 都会生成固定签名的 Debug 和 Release APK；Debug 保留调试功能，Release 启用代码和资源压缩。构建会运行项目现有的单元测试，并通过 `apksigner verify` 检查签名后上传 APK。`main` 上端到端测试生成的应用和 instrumentation APK 也使用同一密钥。
+
+首次启用前必须填写下面的四项 Secrets。缺少配置时，`main` 的签名任务会明确失败，不会悄悄生成使用其他密钥的安装包。普通 PR 不需要这些 Secrets，正式密钥只用于 `main` 的推送及 `main` 上手动运行的签名 Release。
 
 ### 1. 准备并备份密钥
 
@@ -184,22 +186,27 @@ Base64 是私钥文件的另一种表示方式，应与密钥文件一样保管�
 | `ANDROID_KEY_ALIAS` | 密钥别名；上述命令生成的是 `rule34` |
 | `ANDROID_KEY_PASSWORD` | 密钥密码；若生成时直接按回车，则与密钥库密码相同 |
 
-填写 **Secrets**，而不是 Variables。工作流只在 `main` 上运行，不向 PR 提供发布密钥；密钥库恢复到 runner 临时目录，结束时清理。缺少任何一项时会提示缺少的 Secret 名称并停止构建。
+填写 **Secrets**，而不是 Variables。固定密钥不提供给 PR；公共配置 action 将密钥库恢复到 runner 临时目录，以仅当前用户可读写的权限保存，导出 Gradle 所需的环境变量，并在使用后清理。缺少任何一项时会提示缺少的 Secret 名称并停止构建。
 
 ### 3. 生成或发布签名 APK
 
-第一次设置后，进入 **Actions → Signed Android Release → Run workflow**，选择 `main`：
+设置后，每次推送到 `main` 都会自动运行：
+
+- **Android CI**：上传固定签名的 `rule34-Downloader-debug` artifact。
+- **Signed Android Release**：上传 `rule34-Downloader-v<versionName>-release` artifact，里面是 `rule34-Downloader-v<versionName>-release.apk`；普通提交不会创建 GitHub Release。
+
+第一次设置后，也可以进入 **Actions → Signed Android Release → Run workflow**，选择 `main`：
 
 - `publish_release` 勾选：上传 Actions artifact，并发布 `v<versionName>` GitHub Release，例如 `v1.2.0` / `rule34-Downloader-v1.2.0-release.apk`。
 - `publish_release` 取消勾选：只上传签名 APK artifact，可先检查安装效果。
 
-以后推送到 `main` 且最终提交信息包含 `[release]`，也会自动构建并发布签名 Release。`[release-debug]` 继续发布调试 prerelease；普通提交不发布 Release。
+推送到 `main` 且最终提交信息包含 `[release]` 时，会在上传 artifact 后发布签名 Release。`[release-debug]` 继续发布固定签名的调试 prerelease；普通提交只上传 APK artifacts。
 
 签名 Release 不覆盖已有版本，发布新版本前应同时增加 `app/build.gradle.kts` 中的 `versionCode` 和 `versionName`。只想重新打包当前版本时，取消 `publish_release` 即可。
 
-**从调试版切换**：如果设备上已安装的 APK 使用了其他密钥，Android 会拒绝直接覆盖安装。先做好数据备份，再卸载旧版并安装新签名版；卸载会移除应用内的画师、进度和设置等数据，已保存到公共 Downloads 的文件会保留。固定签名版后续使用相同密钥和更高 `versionCode` 时可以正常覆盖升级。
+**首次切换新密钥**：如果设备上已安装的 APK 使用了其他密钥，Android 会拒绝直接覆盖安装。先做好数据备份，再卸载旧版并安装新签名版；卸载会移除应用内的画师、进度和设置等数据，已保存到公共 Downloads 的文件会保留。此后 Debug 和 Release 使用同一密钥和应用 ID，使用相同密钥和更高 `versionCode` 时可以互相覆盖升级。
 
-本地签名构建也读取环境变量：`ANDROID_KEYSTORE_PATH`（密钥库路径，可为绝对路径或相对项目根目录）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`；四项齐全后运行 `./gradlew testDebugUnitTest assembleRelease`。未设置时本地 Release 构建不签名，调试构建仍可正常运行。
+本地签名构建也读取环境变量：`ANDROID_KEYSTORE_PATH`（密钥库路径，可为绝对路径或相对项目根目录）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`；四项齐全后运行 `./gradlew testDebugUnitTest assembleDebug assembleRelease`，Debug 和 Release 都使用该密钥。未设置时本地 Release 构建不签名，Debug 使用默认调试签名。
 
 配置参考 [GitHub Actions Secrets](https://docs.github.com/zh/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets) 和 [Android 应用签名](https://developer.android.com/studio/publish/app-signing?hl=zh-CN)。
 

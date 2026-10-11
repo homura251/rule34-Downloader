@@ -1,0 +1,28 @@
+name: Configure Android signing
+description: Restore the fixed Android signing key and export Gradle signing credentials.
+
+inputs:
+  keystore-base64:
+    description: Base64-encoded signing keystore
+    required: true
+  keystore-password:
+    description: Signing keystore password
+    required: true
+  key-alias:
+    description: Signing key alias
+    required: true
+  key-password:
+    description: Signing key password
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore signing credentials
+      shell: bash
+      env:
+        ANDROID_KEYSTORE_BASE64: ${{ inputs.keystore-base64 }}
+        ANDROID_KEYSTORE_PASSWORD: ${{ inputs.keystore-password }}
+        ANDROID_KEY_ALIAS: ${{ inputs.key-alias }}
+        ANDROID_KEY_PASSWORD: ${{ inputs.key-password }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/restore-signing-key.py"
