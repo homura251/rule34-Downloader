@@ -189,6 +189,7 @@ class BulkDownloadEndToEndTest {
     }
     private fun syncButton(expected: String) {
         ui.onNodeWithTag("nav-subscriptions").performClick()
+        settleFolderFeedback()
         ui.waitUntil(30_000) { ui.onAllNodes(hasTestTag("sync-$tag") and hasText(expected)).fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("sync-$tag").performScrollTo().performClick()
     }
@@ -200,12 +201,7 @@ class BulkDownloadEndToEndTest {
         val previous = read { graph.settings.snapshot() }.existingDownloadsTreeUri
         ui.onNodeWithTag("nav-settings").performClick()
         waitUiTag("settings-list")
-        // The previous folder confirmation can cover this button on a 320dp display.
-        // Native waits do not advance the Compose clock used by the snackbar timeout.
-        ui.mainClock.advanceTimeBy(6_000)
-        ui.waitUntil(10_000) {
-            ui.onAllNodesWithText("旧下载目录已关联；同步时会校验并复用已有文件。").fetchSemanticsNodes().isEmpty()
-        }
+        settleFolderFeedback()
         ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("link-downloads"))
         ui.onNodeWithTag("link-downloads").performClick()
         assertTrue("Native SAF picker must open after clicking the folder button", device.wait(Until.hasObject(By.text(Pattern.compile("(?i)use this folder"))), 15_000))
@@ -221,6 +217,16 @@ class BulkDownloadEndToEndTest {
         }
         capture("$phase-folder-granted.png")
         ui.onNodeWithTag("nav-subscriptions").performClick()
+    }
+    private fun settleFolderFeedback() {
+        val message = "旧下载目录已关联；同步时会校验并复用已有文件。"
+        if (ui.onAllNodesWithText(message).fetchSemanticsNodes().isEmpty()) return
+        // The previous folder confirmation can cover controls on a 320dp display.
+        // Native waits do not advance the Compose clock used by the snackbar timeout.
+        ui.mainClock.advanceTimeBy(6_000)
+        ui.waitUntil(10_000) {
+            ui.onAllNodesWithText(message).fetchSemanticsNodes().isEmpty()
+        }
     }
     private fun verifyAll() {
         val saved = records()
