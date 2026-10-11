@@ -60,6 +60,7 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> if (uri != null) folderSettings.linkFolder(uri.toString()) }
     ReportMessages(folderSettings, snackbar)
     fun openSettings() { navigation.navigate("settings") { launchSingleTop = true } }
+    fun addSubscription() { if (account.canUseApi) { add.reset(); showAdd = true } else openSettings() }
     fun select(destination: Destination) {
         navigation.navigate(destination.route) {
             popUpTo("subscriptions") { saveState = true }
@@ -72,16 +73,16 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
         val detail = route == "collection/{id}"
         Scaffold(
             topBar = { if (!setup) TopAppBar(title = { Text(if (detail) "作品集" else destinations.firstOrNull { it.route == route }?.label ?: "资料库") },
-                navigationIcon = { if (detail) IconButton({ navigation.popBackStack() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") } }) },
+                navigationIcon = { if (detail) IconButton({ navigation.popBackStack() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") } },
+                actions = { if (route == "subscriptions") TextButton(onClick = ::addSubscription, modifier = Modifier.testTag("add-author")) {
+                    Icon(if (account.canUseApi) Icons.Rounded.Add else Icons.Rounded.Key, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp)); Text(if (account.canUseApi) "添加订阅" else "配置 API")
+                } }) },
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = { if (!wide && !setup && !detail) NavigationBar {
                 destinations.forEach { destination -> NavigationBarItem(selected = route == destination.route, onClick = { select(destination) },
                     icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) }, modifier = Modifier.testTag("nav-${destination.route}")) }
             } },
-            floatingActionButton = { if (route == "subscriptions") ExtendedFloatingActionButton(onClick = {
-                if (account.canUseApi) { add.reset(); showAdd = true } else openSettings()
-            }, icon = { Icon(if (account.canUseApi) Icons.Rounded.Add else Icons.Rounded.Key, null) },
-                text = { Text(if (account.canUseApi) "添加订阅" else "配置 API") }, modifier = Modifier.testTag("add-author")) },
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding)) {
                 if (wide && !setup && !detail) NavigationRail {

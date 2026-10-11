@@ -48,7 +48,7 @@ class BulkDownloadEndToEndTest {
 
     @Test fun genuineApiUiProcessRecoveryAndReinstallation() {
         waitUiTag("nav-subscriptions")
-        when (phase) {
+        try { when (phase) {
             "crash" -> prepareCrash()
             "recover" -> recoverCrash()
             "api" -> basicApiPauseResume()
@@ -58,6 +58,12 @@ class BulkDownloadEndToEndTest {
             else -> error("Unknown bulk phase")
         }
         assertEquals(0, origin.authenticationLeaks.get())
+        } finally {
+            runCatching {
+                capture("$phase-final.png")
+                evidence("Final observed state; metadata requests=${origin.lists.get()}")
+            }
+        }
     }
 
     private fun prepareCrash() {
@@ -167,7 +173,7 @@ class BulkDownloadEndToEndTest {
     private fun incrementalKeepsUris() {
         val uris = records().associate { it.postId to it.localUri }
         val media = origin.totalOriginals(); val pages = origin.lists.get()
-        syncButton()
+        syncButton("同步")
         wait(180_000) { origin.lists.get() > pages && state() == SyncState.COMPLETE && workFinished() }
         assertEquals(media, origin.totalOriginals())
         assertEquals(uris, records().associate { it.postId to it.localUri })
@@ -181,14 +187,15 @@ class BulkDownloadEndToEndTest {
         waitUiText("订阅并同步"); ui.onNodeWithText("订阅并同步").performClick()
         waitUiTag("artist-$tag")
     }
-    private fun syncButton() {
+    private fun syncButton(expected: String) {
         ui.onNodeWithTag("nav-subscriptions").performClick()
-        waitUiTag("sync-$tag"); ui.onNodeWithTag("sync-$tag").performScrollTo().performClick()
+        ui.waitUntil(30_000) { ui.onAllNodes(hasTestTag("sync-$tag") and hasText(expected)).fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("sync-$tag").performScrollTo().performClick()
     }
     private fun pauseThroughUi() {
-        syncButton(); wait { state() == SyncState.PAUSED && workFinished() }
+        syncButton("暂停"); wait { state() == SyncState.PAUSED && workFinished() }
     }
-    private fun resumeThroughUi() { assertEquals(SyncState.PAUSED, state()); syncButton() }
+    private fun resumeThroughUi() { assertEquals(SyncState.PAUSED, state()); syncButton("继续") }
     private fun pickFolder(child: Boolean) {
         val previous = read { graph.settings.snapshot() }.existingDownloadsTreeUri
         ui.onNodeWithTag("nav-settings").performClick()
@@ -254,6 +261,7 @@ class BulkDownloadEndToEndTest {
         instrumentation.sendStatus(0, Bundle().apply { putString("stream", "$line\n") })
     }
     private fun capture(name: String) {
+        runCatching { ui.waitForIdle() }
         val image = instrumentation.uiAutomation.takeScreenshot()!!
         writeTestEvidence(app, scope, name, "image/png") { assertTrue(image.compress(Bitmap.CompressFormat.PNG, 100, it)) }; image.recycle()
     }
