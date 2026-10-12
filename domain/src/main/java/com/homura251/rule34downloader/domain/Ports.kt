@@ -104,7 +104,13 @@ interface TaskController {
     suspend fun folderChanged()
 }
 
-interface DownloadFolderAccess { suspend fun link(uri: String) }
+data class FolderLinkResult(val restored: Int, val scheduled: Int, val paused: Int, val waitingForApi: Boolean,
+    val poolDirectories: Int = 0, val unrecognizedDirectories: Int = 0)
+data class FolderLinkState(val linking: Boolean = false, val result: FolderLinkResult? = null, val error: String? = null)
+interface DownloadFolderAccess {
+    val state: StateFlow<FolderLinkState>
+    suspend fun link(uri: String): FolderLinkResult
+}
 
 enum class StartupStatus { LOADING, READY, ERROR }
 data class StartupState(val status: StartupStatus = StartupStatus.LOADING, val error: String? = null)

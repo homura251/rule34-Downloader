@@ -244,6 +244,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
     val account by viewModel.account.collectAsStateWithLifecycle()
     var clear by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
+    val folder by viewModel.folderState.collectAsStateWithLifecycle()
     ReportMessages(viewModel, snackbar)
     LazyColumn(Modifier.fillMaxSize().testTag("settings-list"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         if (setup) item {
@@ -271,12 +272,16 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
                         FilterChip(state.settings.syncIntervalMinutes == minutes, { viewModel.settings(state.settings.copy(syncIntervalMinutes = minutes)) }, label = { Text(label) })
                     }
                 }
-                Button(viewModel::saveSettings, enabled = state.loaded && !state.saving) { Text(if (state.saving) "保存中…" else "保存下载设置") }
+                Button(viewModel::saveSettings, enabled = state.loaded && !state.saving && !folder.linking) { Text(if (state.saving) "保存中…" else "保存下载设置") }
             } }
             item { SettingsSection("存储与恢复") {
                 Text("原文件保存到 Download/Rule34 Downloader/<作者>/。", style = MaterialTheme.typography.bodyMedium)
-                Text("重装后关联原目录，同步时会校验并复用文件。已暂停的任务保持暂停。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedButton(onLinkFolder, modifier = Modifier.testTag("link-downloads")) { Text(if (state.settings.existingDownloadsTreeUri == null) "关联旧下载目录" else "重新关联旧下载目录") }
+                Text("关联后自动识别作者目录、恢复订阅并同步，校验后复用已有文件。已暂停的订阅保持暂停。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(onLinkFolder, enabled = !folder.linking, modifier = Modifier.testTag("link-downloads")) {
+                    Text(if (folder.linking) "正在扫描并安排同步…" else if (state.settings.existingDownloadsTreeUri == null) "关联并自动同步" else "重新关联并同步")
+                }
+                folder.result?.let { Text(it.description(), style = MaterialTheme.typography.bodySmall) }
+                folder.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             } }
             item { SettingsSection("关于") {
                 Text("Rule34 Downloader", style = MaterialTheme.typography.titleMedium)

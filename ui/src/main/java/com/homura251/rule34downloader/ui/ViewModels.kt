@@ -95,6 +95,7 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
     private val mutable = MutableStateFlow(SettingsUiState())
     val state = mutable.asStateFlow()
     val account = services.account.state
+    val folderState = services.folders.state
     init {
         action {
             val settings = services.settings.snapshot()
@@ -151,10 +152,21 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
         }
     }
     fun linkFolder(uri: String) = action {
-        services.folders.link(uri)
+        val result = services.folders.link(uri)
         mutable.update { it.copy(settings = services.settings.snapshot()) }
-        notify("旧下载目录已关联；同步时会校验并复用已有文件。")
+        notify(result.description())
     }
+}
+
+internal fun FolderLinkResult.description(): String = buildString {
+    append("旧下载目录已关联")
+    if (restored > 0) append("，恢复 $restored 个作者订阅")
+    if (scheduled > 0) append("，已自动同步 $scheduled 个订阅")
+    if (waitingForApi) append("；验证 API 后会自动同步")
+    if (paused > 0) append("；$paused 个暂停订阅保持暂停")
+    if (poolDirectories > 0) append("；$poolDirectories 个 Pool 目录暂未恢复")
+    if (unrecognizedDirectories > 0) append("；$unrecognizedDirectories 个目录无法识别作者")
+    append("。")
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

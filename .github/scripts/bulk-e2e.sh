@@ -102,7 +102,7 @@ import json
 from pathlib import Path
 layout=json.loads(Path('app/build/bulk-e2e-evidence/complete-after-reinstall.json').read_text())
 text=json.dumps(layout,ensure_ascii=False)
-assert '3000' in text or '3,000' in text, 'Completed 3000-file batch missing from actual app UI'
+assert '3168' in text or '3,168' in text, 'Three restored author folders (3000 + 84 + 84 files) missing from actual app UI'
 PY_CHECK
 collect
 printf 'PASS: actual process death; API UI pause/resume; 3000 verified files; real uninstall and SAF reuse\n' > app/build/bulk-e2e-evidence/result.txt

@@ -59,12 +59,15 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
                 val tags = url.queryParameter("tags").orEmpty()
                 if (tags.isBlank()) return json("[]") // Low-cost credential validation, without a collection scan.
                 lists.incrementAndGet()
+                val artist = tags.substringBefore(' ')
+                val artistCount = if (count > 200 && artist != tag &&
+                    (artist == tag.replace("test_bulk_", "test_bulk_api_") || artist == tag.replace("test_bulk_", "test_bulk_crash_"))) 84 else count
                 val lower = Regex("id:>([0-9]+)").find(tags)?.groupValues?.get(1)?.toLong() ?: 0
                 val upper = Regex("id:<([0-9]+)").find(tags)?.groupValues?.get(1)?.toLong() ?: Long.MAX_VALUE
                 check(!(tags.contains("id:>") && tags.contains("id:<")))
                 check(url.queryParameter("pid") == "0")
                 val limit = url.queryParameter("limit")!!.toInt()
-                return json(JSONArray().apply { (1L..count.toLong()).reversed().filter { it > lower && it < upper }.take(limit).forEach { put(post(it)) } }.toString()).also {
+                return json(JSONArray().apply { (1L..artistCount.toLong()).reversed().filter { it > lower && it < upper }.take(limit).forEach { put(post(it, artist)) } }.toString()).also {
                     if (pagePauseBefore.compareAndSet(upper, -1)) {
                         delayedPages.incrementAndGet(); delayDeadline.set(System.nanoTime() + TimeUnit.SECONDS.toNanos(21))
                         it.setBodyDelay(20, TimeUnit.SECONDS)
@@ -80,9 +83,9 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
             chain.proceed(chain.request().newBuilder().url(url.newBuilder().scheme("http").host("127.0.0.1").port(server.port).build()).build())
         }.build()
     }
-    fun post(id: Long) = JSONObject().put("id", id).put("file_url", "https://wimg.rule34.xxx/images/$id/${hashes.getValue(id)}.png")
-        .put("preview_url", "https://wimg.rule34.xxx/previews/$id/thumb.png").put("md5", hashes.getValue(id)).put("tags", tag)
-        .put("tag_info", JSONObject().put(tag, 1)).put("width", 2).put("height", 2)
+    fun post(id: Long, artist: String = tag) = JSONObject().put("id", id).put("file_url", "https://wimg.rule34.xxx/images/$id/${hashes.getValue(id)}.png")
+        .put("preview_url", "https://wimg.rule34.xxx/previews/$id/thumb.png").put("md5", hashes.getValue(id)).put("tags", artist)
+        .put("tag_info", JSONObject().put(artist, 1)).put("width", 2).put("height", 2)
     fun originalCount(id: Long) = originals[id]?.get() ?: 0
     fun totalOriginals() = originals.values.sumOf { it.get() }
     private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)

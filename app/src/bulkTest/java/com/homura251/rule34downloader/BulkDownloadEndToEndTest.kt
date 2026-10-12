@@ -151,10 +151,12 @@ class BulkDownloadEndToEndTest {
         assertNull(read { graph.settings.snapshot() }.existingDownloadsTreeUri)
         assertTrue(app.contentResolver.persistedUriPermissions.isEmpty())
         assertFalse("Android Keystore account data must be cleared by uninstall", BulkTestEnvironment.credentialsPresentBeforeSeed)
+        origin.pagePauseBefore.set(count.toLong() - 199)
         pickFolder(child = false)
         val root = read { graph.settings.snapshot() }.existingDownloadsTreeUri!!
-        origin.pagePauseBefore.set(count.toLong() - 199)
-        addThroughUi()
+        assertEquals("Association restores all three author folders without manually adding subscriptions", 3, read { repo.getCollections() }.size)
+        assertEquals(3, graph.folders.state.value.result!!.restored)
+        assertEquals(3, graph.folders.state.value.result!!.scheduled)
         wait { origin.delayedPages.get() == 1 && records().size == 200 }
         pauseThroughUi()
         pickFolder(child = true)
@@ -163,12 +165,13 @@ class BulkDownloadEndToEndTest {
         assertTrue("Changing the selected folder retains the previous read grant", app.contentResolver.persistedUriPermissions.any { it.uri == Uri.parse(root) && it.isReadPermission })
         resumeThroughUi()
         wait(600_000) { completed() == count && workFinished() }
+        wait { read { repo.getCollections() }.all { it.syncState == SyncState.COMPLETE } }
         assertEquals("Only damaged or absent originals may cross HTTP", 7, origin.totalOriginals())
         assertEquals(count - 7, records().count { it.localUri!!.contains("externalstorage.documents") })
         assertTrue(record(8)!!.localUri!!.contains("externalstorage.documents"))
         assertTrue(record(9)!!.localUri!!.contains("externalstorage.documents"))
         verifyAll(); incrementalKeepsUris(); capture("restore-3000-complete.png")
-        evidence("PASS: real reinstall + native SAF root/child picker; ${count - 7} valid files reused; seven bad/missing originals repaired; all $count bytes/URIs verified")
+        evidence("PASS: real reinstall + native SAF root/child picker; association automatically restored/synced three author folders; ${count - 7} valid primary files reused; seven bad/missing originals repaired; all $count bytes/URIs verified")
     }
     private fun incrementalKeepsUris() {
         val uris = records().associate { it.postId to it.localUri }
@@ -213,19 +216,19 @@ class BulkDownloadEndToEndTest {
         wait {
             val selected = read { graph.settings.snapshot() }.existingDownloadsTreeUri
             selected != null && (!child || DocumentsContract.getTreeDocumentId(Uri.parse(selected)).endsWith("/$tag")) &&
-                app.contentResolver.persistedUriPermissions.any { it.uri == Uri.parse(selected) && it.isReadPermission }
+                app.contentResolver.persistedUriPermissions.any { it.uri == Uri.parse(selected) && it.isReadPermission } &&
+                !graph.folders.state.value.linking && graph.folders.state.value.result != null
         }
         capture("$phase-folder-granted.png")
         ui.onNodeWithTag("nav-subscriptions").performClick()
     }
     private fun settleFolderFeedback() {
-        val message = "旧下载目录已关联；同步时会校验并复用已有文件。"
-        if (ui.onAllNodesWithText(message).fetchSemanticsNodes().isEmpty()) return
+        if (ui.onAllNodesWithTag("app-message").fetchSemanticsNodes().isEmpty()) return
         // The previous folder confirmation can cover controls on a 320dp display.
         // Native waits do not advance the Compose clock used by the snackbar timeout.
         ui.mainClock.advanceTimeBy(6_000)
         ui.waitUntil(10_000) {
-            ui.onAllNodesWithText(message).fetchSemanticsNodes().isEmpty()
+            ui.onAllNodesWithTag("app-message").fetchSemanticsNodes().isEmpty()
         }
     }
     private fun verifyAll() {

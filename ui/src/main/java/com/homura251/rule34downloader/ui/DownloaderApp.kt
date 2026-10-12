@@ -78,7 +78,7 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
                     Icon(if (account.canUseApi) Icons.Rounded.Add else Icons.Rounded.Key, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp)); Text(if (account.canUseApi) "添加订阅" else "配置 API")
                 } }) },
-            snackbarHost = { SnackbarHost(snackbar) },
+            snackbarHost = { SnackbarHost(snackbar) { Snackbar(it, modifier = Modifier.testTag("app-message")) } },
             bottomBar = { if (!wide && !setup && !detail) NavigationBar {
                 destinations.forEach { destination -> NavigationBarItem(selected = route == destination.route, onClick = { select(destination) },
                     icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) }, modifier = Modifier.testTag("nav-${destination.route}")) }

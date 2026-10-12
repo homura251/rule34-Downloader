@@ -8,14 +8,19 @@ import com.homura251.rule34downloader.domain.*
 import com.homura251.rule34downloader.download.*
 import com.homura251.rule34downloader.network.HttpMediaTransport
 import com.homura251.rule34downloader.storage.ExistingDownloads
+import com.homura251.rule34downloader.storage.LinkedDownloadDirectory
 import com.homura251.rule34downloader.storage.MediaStoreDownloader
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import java.io.IOException
 
 interface BackgroundRuntimeOwner { val backgroundRuntime: BackgroundRuntime }
 
@@ -29,6 +34,9 @@ class BackgroundRuntime(
 ) : TaskController, DownloadFolderAccess {
     private val manager get() = WorkManager.getInstance(context)
     private val slots = Semaphore(2)
+    private val folderLinks = Mutex()
+    private val mutableFolderState = MutableStateFlow(FolderLinkState())
+    override val state = mutableFolderState.asStateFlow()
     @Volatile private var ready = CompletableDeferred<Unit>()
 
     suspend fun initialize() {
@@ -66,12 +74,12 @@ class BackgroundRuntime(
             enqueue(collection.tag, ExistingWorkPolicy.KEEP, false)
     }
 
-    private suspend fun enqueue(id: String, policy: ExistingWorkPolicy, userInitiated: Boolean, delayMillis: Long = 0) {
-        val collection = repository.getCollection(id) ?: return
-        if (collection.paused || collection.poolId != null || !account.state.value.canUseApi) return
+    private suspend fun enqueue(id: String, policy: ExistingWorkPolicy, userInitiated: Boolean, delayMillis: Long = 0): Boolean {
+        val collection = repository.getCollection(id) ?: return false
+        if (collection.paused || collection.poolId != null || !account.state.value.canUseApi) return false
         if (policy == ExistingWorkPolicy.KEEP && withContext(Dispatchers.IO) {
             manager.getWorkInfosForUniqueWork(workName(id)).get(10, TimeUnit.SECONDS).any { !it.state.isFinished }
-        }) return
+        }) return false
         val preferences = settings.snapshot()
         if (delayMillis == 0L) repository.markQueued(id)
         val request = OneTimeWorkRequestBuilder<ArtistSyncWorker>()
@@ -79,7 +87,8 @@ class BackgroundRuntime(
             .setConstraints(Constraints.Builder().setRequiredNetworkType(if (preferences.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED).build())
             .setInitialDelay(delayMillis.coerceAtLeast(0), TimeUnit.MILLISECONDS)
             .addTag(SYNC_TAG).addTag(workName(id)).build()
-        manager.enqueueUniqueWork(workName(id), policy, request)
+        withContext(Dispatchers.IO) { manager.enqueueUniqueWork(workName(id), policy, request).result.get(10, TimeUnit.SECONDS) }
+        return true
     }
 
     suspend fun followUp(id: String, delayMillis: Long) = enqueue(id, ExistingWorkPolicy.APPEND_OR_REPLACE, false, delayMillis)
@@ -131,17 +140,51 @@ class BackgroundRuntime(
         manager.enqueueUniquePeriodicWork(PERIODIC_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
     override suspend fun folderChanged() {
-        for (collection in repository.getCollections()) if (collection.poolId == null && !collection.paused &&
-            collection.syncState in setOf(SyncState.SYNCING, SyncState.DISCOVERING, SyncState.VERIFYING,
-                SyncState.QUEUED, SyncState.WAITING_RETRY, SyncState.WAITING_NETWORK)) {
-            SyncControls.pause(collection.tag)
-            enqueue(collection.tag, ExistingWorkPolicy.REPLACE, false)
-        }
+        resyncLinkedFolders(repository.getCollections().filter { it.poolId == null }.mapTo(mutableSetOf()) { it.tag })
     }
-    override suspend fun link(uri: String) {
-        context.contentResolver.takePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        settings.save(settings.snapshot().copy(existingDownloadsTreeUri = uri))
-        folderChanged()
+    private suspend fun resyncLinkedFolders(ids: Set<String>): Int {
+        if (!account.state.value.canUseApi) { repository.suspendForAuthentication(); return 0 }
+        var scheduled = 0
+        for (collection in repository.getCollections()) if (collection.tag in ids && collection.poolId == null && !collection.paused) {
+            SyncControls.pause(collection.tag)
+            repository.resetFailures(collection.tag)
+            if (enqueue(collection.tag, ExistingWorkPolicy.REPLACE, true)) scheduled++
+        }
+        return scheduled
+    }
+    override suspend fun link(uri: String): FolderLinkResult = folderLinks.withLock {
+        mutableFolderState.value = FolderLinkState(linking = true)
+        try {
+            val tree = Uri.parse(uri)
+            context.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val job = currentCoroutineContext()
+            val scan = withContext(Dispatchers.IO) { LinkedDownloadDirectory(context.contentResolver, tree) { job.ensureActive() }.scan() }
+            val plan = FolderRestorePlan.create(scan.directories, repository.getCollections(), scan.wholeLibrary)
+            if (plan.targets.isEmpty() && plan.paused == 0 && plan.poolDirectories == 0)
+                throw SourceFailure(FailureKind.FILE, "未发现可恢复的作者目录。请选择 Rule34 Downloader 根目录或作者子目录。")
+            // Once the association is saved, creating subscriptions and scheduling work must survive navigation.
+            val result = withContext(NonCancellable) {
+                settings.save(settings.snapshot().copy(existingDownloadsTreeUri = uri))
+                var restored = 0
+                for (addition in plan.additions) if (repository.addCollection(addition.tag, addition.sourcePostId)) restored++
+                val scheduled = resyncLinkedFolders(plan.targets)
+                FolderLinkResult(restored, scheduled, plan.paused, plan.targets.isNotEmpty() && !account.state.value.canUseApi,
+                    plan.poolDirectories, plan.unrecognizedDirectories)
+            }
+            mutableFolderState.value = FolderLinkState(result = result)
+            result
+        } catch (e: CancellationException) {
+            mutableFolderState.value = FolderLinkState()
+            throw e
+        } catch (e: Exception) {
+            val error = when (e) {
+                is SecurityException -> SourceFailure(FailureKind.FILE, "无法读取所选目录，请重新授权旧下载目录。")
+                is IOException -> SourceFailure(FailureKind.FILE, "无法扫描旧下载目录，请检查目录是否可读取。")
+                else -> e
+            }
+            mutableFolderState.value = FolderLinkState(error = error.userMessage())
+            throw error
+        }
     }
 
     suspend fun execute(id: String, observer: SyncObserver): SyncOutcome = slots.withPermit {
