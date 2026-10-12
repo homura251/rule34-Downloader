@@ -124,7 +124,11 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
                         composable("settings") {
                             val model: SettingsViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { SettingsViewModel(services) } } })
                             SettingsScreen(model, snackbar, {
-                                picker.launch(preferences.existingDownloadsTreeUri?.let(Uri::parse) ?: DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Download/Rule34 Downloader"))
+                                val initial = preferences.existingDownloadsTreeUri?.let { value -> runCatching {
+                                    val tree = Uri.parse(value)
+                                    DocumentsContract.buildDocumentUri(checkNotNull(tree.authority), DocumentsContract.getTreeDocumentId(tree))
+                                }.getOrNull() }
+                                picker.launch(initial ?: DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Download/Rule34 Downloader"))
                             }, onRequestNotificationPermission)
                         }
                     }

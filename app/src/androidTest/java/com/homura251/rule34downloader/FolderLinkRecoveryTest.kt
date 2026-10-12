@@ -90,7 +90,14 @@ class FolderLinkRecoveryTest {
             assertEquals(requests, origin.totalOriginals())
             assertEquals(0, origin.authenticationLeaks.get())
             writeTestText(app, "controlled", "folder-link-result.txt", "PASS: real SAF picker; completed subscriptions automatically resynced; missing subscriptions recreated from author folders; saved URIs preserved; paused subscription unchanged; no API calls while credentials missing; validation automatically resumed recovery; no extra original HTTP requests")
-        } finally { files.forEach { app.contentResolver.delete(it, null, null) } }
+        } finally {
+            runCatching {
+                val image = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()!!
+                writeTestEvidence(app, "controlled", "folder-link-final.png", "image/png") { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                image.recycle()
+            }
+            files.forEach { app.contentResolver.delete(it, null, null) }
+        }
     }
 
     private fun seedFiles(tag: String): List<Uri> = (1L..3L).map { id ->

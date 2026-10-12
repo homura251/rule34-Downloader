@@ -193,6 +193,7 @@ class BulkDownloadEndToEndTest {
     private fun syncButton(expected: String) {
         ui.onNodeWithTag("nav-subscriptions").performClick()
         settleFolderFeedback()
+        ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("sync-$tag"))
         ui.waitUntil(30_000) { ui.onAllNodes(hasTestTag("sync-$tag") and hasText(expected)).fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("sync-$tag").performScrollTo().performClick()
     }

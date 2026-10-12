@@ -76,7 +76,7 @@ fun SubscriptionsScreen(viewModel: SubscriptionsViewModel, account: AccountState
     val collections by viewModel.collections.collectAsStateWithLifecycle()
     var removing by remember { mutableStateOf<CollectionSummary?>(null) }
     ReportMessages(viewModel, snackbar)
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("subscriptions-list"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             val downloaded = collections.sumOf { it.downloadedCount }
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -280,7 +280,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
                 OutlinedButton(onLinkFolder, enabled = !folder.linking, modifier = Modifier.testTag("link-downloads")) {
                     Text(if (folder.linking) "正在扫描并安排同步…" else if (state.settings.existingDownloadsTreeUri == null) "关联并自动同步" else "重新关联并同步")
                 }
-                folder.result?.let { Text(it.description(), style = MaterialTheme.typography.bodySmall) }
+                folder.result?.let { Text(it.copy(waitingForApi = it.waitingForApi && !account.canUseApi).description(), style = MaterialTheme.typography.bodySmall) }
                 folder.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             } }
             item { SettingsSection("关于") {
