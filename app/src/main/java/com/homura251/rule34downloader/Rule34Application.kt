@@ -5,16 +5,19 @@ import androidx.work.Configuration
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.ImageDecoderDecoder
-import com.homura251.rule34downloader.network.Rule34Network
 import com.homura251.rule34downloader.work.DownloadNotifications
-import com.homura251.rule34downloader.work.SyncScheduler
+import com.homura251.rule34downloader.work.BackgroundRuntimeOwner
 import com.homura251.rule34downloader.work.DownloaderWorkerFactory
 
-class Rule34Application : Application(), ImageLoaderFactory, Configuration.Provider {
+class Rule34Application : Application(), ImageLoaderFactory, Configuration.Provider, BackgroundRuntimeOwner {
+    private var overrideGraph: AppGraph? = null
+    private val defaultGraph by lazy { AppGraph(this) }
+    val graph: AppGraph get() = overrideGraph ?: defaultGraph
+    override val backgroundRuntime get() = graph.background
     override val workManagerConfiguration: Configuration
-        get() = Configuration.Builder().setWorkerFactory(DownloaderWorkerFactory).build()
+        get() = Configuration.Builder().setWorkerFactory(DownloaderWorkerFactory { backgroundRuntime }).build()
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
-        .okHttpClient { Rule34Network.get(this).client }
+        .okHttpClient { graph.mediaHttp }
         .components { add(ImageDecoderDecoder.Factory()) }
         .crossfade(true)
         .build()
@@ -22,6 +25,10 @@ class Rule34Application : Application(), ImageLoaderFactory, Configuration.Provi
     override fun onCreate() {
         super.onCreate()
         DownloadNotifications.createChannels(this)
-        SyncScheduler.ensurePeriodicSchedule(this)
+        graph.start()
+    }
+    fun installGraphForTests(value: AppGraph) {
+        check(BuildConfig.DEBUG)
+        overrideGraph?.close(); overrideGraph = value; value.start()
     }
 }

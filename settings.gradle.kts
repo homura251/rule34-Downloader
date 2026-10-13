@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "rule34-Downloader"
-include(":app")
+include(":app", ":domain", ":download", ":data", ":platform", ":ui")

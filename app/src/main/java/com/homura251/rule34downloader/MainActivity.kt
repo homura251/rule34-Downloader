@@ -11,9 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.homura251.rule34downloader.ui.DownloaderApp
-import com.homura251.rule34downloader.ui.MainViewModel
 import com.homura251.rule34downloader.ui.theme.Rule34DownloaderTheme
 
 class MainActivity : ComponentActivity() {
@@ -29,13 +27,12 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AppContent() {
-        val mainViewModel: MainViewModel = viewModel()
         val notificationPermissionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission(),
         ) { }
 
         DownloaderApp(
-            viewModel = mainViewModel,
+            services = (application as Rule34Application).graph,
             onRequestNotificationPermission = {
                 if (
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
