@@ -40,6 +40,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v6
       - name: Prepare build tools (AGP installs Platform 37.0)
         run: sdkmanager 'build-tools;36.0.0'
@@ -75,6 +76,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v6
       - name: Prepare build tools (AGP installs Platform 37.0)
         run: sdkmanager 'build-tools;36.0.0'
@@ -117,6 +119,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v6
       - run: sdkmanager 'build-tools;36.0.0'
       - name: Real API and original-file integrity
@@ -149,6 +152,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v6
       - run: sdkmanager 'build-tools;36.0.0'
       - name: Enable KVM

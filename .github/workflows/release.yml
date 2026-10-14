@@ -34,6 +34,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v6
       - run: sdkmanager 'build-tools;36.0.0'
       - name: Restore existing signing identity

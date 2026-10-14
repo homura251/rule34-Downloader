@@ -33,11 +33,11 @@ class Rule34LiveApiTest {
                 withTimeout(240_000) {
                     val catalog = Rule34ApiClient(account, http, pageSize = 2)
                     catalog.validate(credentials)
-                    val first = catalog.searchPosts("rating:safe", 0, null)
+                    val first = catalog.searchPosts("-ai_generated", 0, null)
                     assertEquals("Live search must exercise a full page", 2, first.size)
                     assertTrue(first[0].id > first[1].id)
                     assertTrue(first.all { FileChecksum.normalize(it.md5) != null })
-                    val second = catalog.searchPosts("rating:safe", 0, first.last().id)
+                    val second = catalog.searchPosts("-ai_generated", 0, first.last().id)
                     assertEquals(2, second.size)
                     assertTrue(second.all { it.id < first.last().id })
                     assertTrue((first + second).map { it.id }.distinct().size == 4)
@@ -45,7 +45,7 @@ class Rule34LiveApiTest {
                     // A future watermark isolates the empty incremental case from concurrent uploads.
                     val fixedTag = "id:${first.first().id}"
                     assertEquals(listOf(first.first().id), catalog.searchPosts(fixedTag, 0, null).map { it.id })
-                    assertTrue(catalog.searchPosts("rating:safe", Int.MAX_VALUE.toLong(), null).isEmpty())
+                    assertTrue(catalog.searchPosts("-ai_generated", Int.MAX_VALUE.toLong(), null).isEmpty())
                     assertTrue(catalog.searchPosts("downloader_absent_${UUID.randomUUID().toString().replace("-", "")}", 0, null).isEmpty())
                     try {
                         catalog.getPost(Int.MAX_VALUE.toLong())
