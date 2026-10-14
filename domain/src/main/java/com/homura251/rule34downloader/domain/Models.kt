@@ -29,7 +29,9 @@ enum class DownloadStatus {
 data class ApiCredentials(
     val userId: String,
     val apiKey: String,
-)
+) {
+    override fun toString(): String = "ApiCredentials(userId=$userId, apiKey=<redacted>)"
+}
 
 data class Rule34Post(
     val id: Long,

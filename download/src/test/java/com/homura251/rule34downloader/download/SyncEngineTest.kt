@@ -92,6 +92,25 @@ class SyncEngineTest {
         assertEquals("content://old/1", repo.rows.getValue(1).localUri)
     }
 
+    @Test fun emptyIncrementalScanStillDrainsThePersistedQueueAndReusesOldFiles() = runTest {
+        repo.collection = repo.collection.copy(lastSeenPostId = 61)
+        repo.seed(post(1), DownloadStatus.DOWNLOADED, "content://old/1")
+        repo.seed(post(2))
+        val reuse = object : FileReuse {
+            override suspend fun lookup(record: DownloadRecord) = ReuseResult(
+                if (record.postId == 1L) SavedFile("content://old/1", 10, HASH) else null)
+        }
+        assertEquals(SyncOutcome.Complete(1, 0), SyncEngine(repo, catalog, downloader, reuse).run("artist"))
+        assertEquals(listOf(2L), transferred)
+        assertEquals("content://old/1", repo.rows.getValue(1).localUri)
+        assertEquals(61L, repo.collection.lastSeenPostId)
+        assertNull(repo.scan)
+        assertEquals(SyncOutcome.Complete(0, 0), SyncEngine(repo, catalog, downloader, object : FileReuse {
+            override suspend fun lookup(record: DownloadRecord) = ReuseResult(SavedFile(record.localUri!!, 10, HASH))
+        }).run("artist"))
+        assertEquals(listOf(2L), transferred)
+    }
+
     @Test fun cancellationResetsPartialFileButKeepsUserPausedIntent() = runTest {
         repo.seed(post(1))
         val started = CompletableDeferred<Unit>()

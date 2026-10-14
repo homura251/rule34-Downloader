@@ -55,7 +55,7 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
                 if (url.queryParameter("user_id") != "42" || url.queryParameter("api_key") != "fixture-key") return MockResponse().setResponseCode(401)
                 if (url.queryParameter("s") == "tag") return json(JSONArray().put(JSONObject().put("name", tag).put("type", 1).put("count", count)).toString())
                 val id = url.queryParameter("id")?.toLongOrNull()
-                if (id != null) return json(JSONArray().apply { if (id in 1L..count.toLong()) put(post(id)) }.toString())
+                if (id != null) return if (id in 1L..count.toLong()) json(JSONArray().put(post(id)).toString()) else emptyPosts(url)
                 val tags = url.queryParameter("tags").orEmpty()
                 if (tags.isBlank()) return json("[]") // Low-cost credential validation, without a collection scan.
                 lists.incrementAndGet()
@@ -67,7 +67,8 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
                 check(!(tags.contains("id:>") && tags.contains("id:<")))
                 check(url.queryParameter("pid") == "0")
                 val limit = url.queryParameter("limit")!!.toInt()
-                return json(JSONArray().apply { (1L..artistCount.toLong()).reversed().filter { it > lower && it < upper }.take(limit).forEach { put(post(it, artist)) } }.toString()).also {
+                val posts = (1L..artistCount.toLong()).reversed().filter { it > lower && it < upper }.take(limit)
+                return (if (posts.isEmpty()) emptyPosts(url) else json(JSONArray().apply { posts.forEach { put(post(it, artist)) } }.toString())).also {
                     if (pagePauseBefore.compareAndSet(upper, -1)) {
                         delayedPages.incrementAndGet(); delayDeadline.set(System.nanoTime() + TimeUnit.SECONDS.toNanos(21))
                         it.setBodyDelay(20, TimeUnit.SECONDS)
@@ -84,11 +85,13 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
         }.build()
     }
     fun post(id: Long, artist: String = tag) = JSONObject().put("id", id).put("file_url", "https://wimg.rule34.xxx/images/$id/${hashes.getValue(id)}.png")
-        .put("preview_url", "https://wimg.rule34.xxx/previews/$id/thumb.png").put("md5", hashes.getValue(id)).put("tags", artist)
-        .put("tag_info", JSONObject().put(artist, 1)).put("width", 2).put("height", 2)
+        .put("preview_url", "https://wimg.rule34.xxx/previews/$id/thumb.png").put("hash", hashes.getValue(id)).put("tags", artist)
+        .put("tag_info", JSONArray().put(JSONObject().put("tag", artist).put("type", "artist").put("count", count))).put("width", 2).put("height", 2)
     fun originalCount(id: Long) = originals[id]?.get() ?: 0
     fun totalOriginals() = originals.values.sumOf { it.get() }
     private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
+    private fun emptyPosts(url: HttpUrl) = if (url.queryParameter("json") == "1") json("")
+        else MockResponse().setHeader("Content-Type", "text/xml;charset=UTF-8").setBody("<posts count=\"0\" offset=\"0\"></posts>")
     override fun close() {
         client.connectionPool.evictAll(); client.dispatcher.executorService.shutdownNow()
         val remaining = delayDeadline.get() - System.nanoTime()

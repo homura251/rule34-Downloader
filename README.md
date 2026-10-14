@@ -1,6 +1,6 @@
 # Rule34 Downloader for Android
 
-Android 10+ 的原文件下载与本地资料库应用。2.0 使用 Rule34 DAPI，按作者标签订阅，提供 **订阅 / 作品 / 任务 / 设置** 四个入口。Android 12+ 支持 Material You 动态配色，宽屏使用侧边导航。
+Android 10+ 的原文件下载与本地资料库应用。2.0.2 使用 Rule34 DAPI，按作者标签订阅，提供 **订阅 / 作品 / 任务 / 设置** 四个入口。Android 12+ 支持 Material You 动态配色，宽屏使用侧边导航。
 
 ## 使用
 
@@ -22,6 +22,7 @@ User ID / API Key 使用 Android Keystore AES-GCM 加密保存在本机。凭据
 - 暂停以文件为单位：已完成 URI 保留，中断的文件继续时从头下载。未实现 HTTP Range 断点续传。
 - 暂停意图、待下载队列、分页检查点、重试次数持久化。应用启动恢复被中断的工作，用户暂停的任务保持暂停。
 - 完整分页扫描成功才提交最高 Post ID。扫描过程中出错不会把未扫描页面标记为完成。
+- 增量同步仅发现高于上次完整扫描水位的新帖子，原有待下载队列仍会继续。原站的空 JSON 正文会通过同一搜索的 XML `count="0"` 确认；空结果不再阻断队列，截断或验证网页仍不能提交扫描水位。
 - 同时运行最多两组任务。同一实际目录使用互斥锁，清理中断条目只涉及本安装拥有的未公开文件。
 - 关联旧目录使用 SAF 读授权；识别后自动同步相关订阅，包括已完成或失败的订阅。已有用户暂停意图保持不变，更换目录不会释放以前的读授权。没有有效 API 凭据时，恢复的订阅等待验证，验证成功后自动继续。
 - 自动恢复依赖作者目录名与 Post ID 文件名。无法识别的目录及旧 Pool 目录会在关联结果中明确列出，不会把它们当作作者建立订阅；Pool 在线恢复仍未实现。
@@ -57,14 +58,22 @@ UI 不直接访问 Room、WorkManager 或 HTTP。下载引擎通过接口使用�
 ./gradlew assembleDebugAndroidTest connectedDebugAndroidTest
 ```
 
-CI 包括：
+`Android checks` 替换旧 CI：提交和 PR 自动运行 JVM / Android 单元测试、lint、Debug / Release 构建和 Android 35 模拟器回归。构建使用 JDK 17，AGP 会安装 Android SDK Platform 37.0。CI 包括：
 
 - JVM 下载引擎与 API 协议测试：分页检查点、认证错误、HTML 拒绝、请求取消、重试与发布边界。
 - Robolectric + SQLite 的真实 Room 迁移测试：旧数据库 1–5 版、旧 URI、暂停、Pool 顺序、事务回滚和过期运行写入隔离。
 - Android 35 端到端：API 配置门禁、四个页面、UI 暂停/继续、真实 HTTP、MediaStore 读回校验和无凭据本地浏览。
-- 批量端到端：3000 个独立原文件、元数据扫描暂停、真实 `force-stop`、保留完成 URI、真实卸载重装、系统 SAF 根目录/子目录选择与坏文件修复。
+- 手动启用的批量端到端（`bulk_restore`）：3000 个独立原文件、元数据扫描暂停、真实 `force-stop`、保留完成 URI、真实卸载重装、系统 SAF 根目录/子目录选择与坏文件修复。
 
-受控 Android 测试通过 Debug instrumentation 注入本机 HTTP API 与独立 PNG，不证明真实原站或任意标签可用。正式安装没有测试站点入口，Release 只使用正式 API。已删除原匿名原站检查。
+受控 Android 测试通过 Debug instrumentation 注入本机 HTTP API 与独立 PNG，模拟原站的 `hash`、文本类型 `tag_info` 和空 JSON / XML 确认，不证明任意标签可用。正式安装没有测试站点入口，Release 只使用正式 API。
+
+真实原站测试默认不运行。手动触发 `Android checks` 并打开 `live_api`，凭据从 Repository Secrets `RULE34_USER_ID` / `RULE34_API_KEY` 读取。测试覆盖认证、互不重复的两页搜索、空增量、无结果搜索、已删除帖子、作者解析、一个原文件的流式 MD5 / 读回校验及损坏检测。它只下载临时文件，不修改账号或订阅。本地可通过相同环境变量运行：
+
+```bash
+RULE34_LIVE_TESTS=true ./gradlew :data:testDebugUnitTest --tests '*Rule34LiveApiTest' --rerun-tasks
+```
+
+User ID 和 API Key 应通过环境提供，不要写入命令、源码或报告。测试完成后删除临时媒体，不保存原始 API 响应或带认证参数的 URL。
 
 批量测试在带 KVM 的模拟器上运行：
 
@@ -87,6 +96,6 @@ Actions artifacts 保存 APK、测试报告、截图和逐阶段实际文件校�
 
 同一个 GitHub Organization 可将这四项设为 Organization Secrets，授权多个仓库读取；所有仓库的签名步骤沿用相同密钥和 alias。个人账户使用每个仓库的 Repository Secrets。备份原始 Keystore 和密码，后续更新沿用同一密钥。
 
-`Signed Android Release` 工作流验证并构建固定签名 Release。手动运行时可关闭 `publish_release`，仅生成 artifact；在 main 上提交信息含 `[release]` 时会发布。普通 CI 用临时密钥验证压缩后的 Release 构建，该临时 Release 不会上传或发布。
+`Signed APK` 工作流验证并构建固定签名 Release。手动运行默认仅生成 artifact，打开 `publish` 才发布；推送与应用版本一致的 `v2.0.2` 形式标签也会发布。发布前运行单元测试、Release lint 并验证 APK 签名；已有同名 Release 不会被删除或覆盖。普通 CI 编译压缩后的未签名 Release，并提供可安装的 Debug APK。
 
 本地固定签名构建读取四项环境变量：`ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。四项齐全后 Debug 与 Release 都使用该密钥，可运行 `./gradlew assembleDebug assembleRelease`；未配置时 Debug 使用 SDK 调试密钥。签名密钥与已安装版本不一致时不能覆盖安装；卸载会清除应用数据库、凭据和目录授权，公共下载文件保留。
