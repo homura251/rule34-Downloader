@@ -12,6 +12,7 @@ import kotlinx.coroutines.CancellationException
 class ArtistSyncWorker(context: Context, parameters: WorkerParameters, private val runtime: BackgroundRuntime) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
         val id = inputData.getString(KEY_ARTIST_TAG)?.takeIf(String::isNotBlank) ?: return Result.failure()
+        val mode = SyncMode.entries.firstOrNull { it.name == inputData.getString(KEY_SYNC_MODE) } ?: SyncMode.FULL
         val notifications = DownloadNotifications(applicationContext)
         DownloadNotifications.createChannels(applicationContext)
         try {
@@ -21,8 +22,8 @@ class ArtistSyncWorker(context: Context, parameters: WorkerParameters, private v
                     if (Build.VERSION.SDK_INT < 31 || e.javaClass.name != "android.app.ForegroundServiceStartNotAllowedException") throw e
                 }
             }
-            return when (val outcome = runtime.execute(id, SyncObserver { done, total, post -> notifications.updateProgress(id, done, total, post) })) {
-                is SyncOutcome.Retry -> { runtime.followUp(id, outcome.delayMillis); Result.success() }
+            return when (val outcome = runtime.execute(id, SyncObserver { done, total, post -> notifications.updateProgress(id, done, total, post) }, mode)) {
+                is SyncOutcome.Retry -> { runtime.followUp(id, outcome.delayMillis, outcome.mode); Result.success() }
                 is SyncOutcome.Complete -> { notifications.showFinished(id, outcome.downloaded, outcome.failed); Result.success() }
                 SyncOutcome.NeedsAuthentication -> { runtime.repository.suspendForAuthentication(); Result.success() }
                 SyncOutcome.Skipped -> Result.success()
@@ -37,5 +38,6 @@ class ArtistSyncWorker(context: Context, parameters: WorkerParameters, private v
     companion object {
         const val KEY_ARTIST_TAG = "artist_tag"
         const val KEY_USER_INITIATED = "user_initiated"
+        const val KEY_SYNC_MODE = "sync_mode"
     }
 }

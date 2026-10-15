@@ -12,8 +12,9 @@ if (( status != 0 )); then
   exit "$status"
 fi
 
-android --no-metrics --sdk="$ANDROID_HOME" info > app/build/e2e-evidence/android-info.txt
-android --no-metrics --sdk="$ANDROID_HOME" install --apks=app/build/outputs/apk/debug/app-debug.apk --install-options=-g
+adb shell getprop > app/build/e2e-evidence/device-info.txt
+adb install -r -g app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -W -n com.homura251.rule34downloader/.MainActivity
-android --no-metrics --sdk="$ANDROID_HOME" screen capture --output=app/build/e2e-evidence/cli-screen.png
-android --no-metrics --sdk="$ANDROID_HOME" layout --output=app/build/e2e-evidence/cli-layout.json
+adb exec-out screencap -p > app/build/e2e-evidence/screen.png
+adb shell uiautomator dump /sdcard/rule34-layout.xml
+adb pull /sdcard/rule34-layout.xml app/build/e2e-evidence/layout.xml

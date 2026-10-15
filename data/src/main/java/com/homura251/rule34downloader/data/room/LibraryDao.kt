@@ -19,7 +19,7 @@ interface LibraryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertCollection(entity: CollectionEntity): Long
     @Query("DELETE FROM collections WHERE id = :id") suspend fun removeCollection(id: String)
     @Query("SELECT COUNT(*) FROM collections WHERE id = :id AND run_id = :runId") suspend fun ownsRun(id: String, runId: String): Int
-    @Query("UPDATE collections SET run_id = :runId, state = 'DISCOVERING', next_retry_at = NULL, last_error = NULL WHERE id = :id AND user_paused = 0 AND pool_id IS NULL")
+    @Query("UPDATE collections SET run_id = :runId, state = 'DISCOVERING', next_retry_at = NULL, last_error = NULL WHERE id = :id AND user_paused = 0 AND pool_id IS NULL AND run_id IS NULL")
     suspend fun beginRun(id: String, runId: String): Int
     @Query("UPDATE collections SET state = :state, last_error = :error, next_retry_at = :nextRetryAt, retry_attempts = CASE WHEN :state IN ('WAITING_RETRY', 'WAITING_NETWORK') THEN retry_attempts + 1 WHEN :state = 'COMPLETE' THEN 0 ELSE retry_attempts END, last_sync_at = CASE WHEN :state IN ('COMPLETE', 'ERROR') THEN :now ELSE last_sync_at END WHERE id = :id AND run_id = :runId AND user_paused = 0")
     suspend fun state(id: String, runId: String, state: String, error: String?, nextRetryAt: Long?, now: Long)
@@ -28,13 +28,21 @@ interface LibraryDao {
     @Query("UPDATE collections SET user_paused = 1, state = 'PAUSING', next_retry_at = NULL WHERE id = :id AND pool_id IS NULL") suspend fun pause(id: String)
     @Query("UPDATE collections SET state = 'PAUSED', current_post_id = NULL WHERE id = :id AND user_paused = 1 AND run_id IS NULL") suspend fun finishPause(id: String)
     @Query("UPDATE collections SET user_paused = 0, state = 'IDLE', last_error = NULL, next_retry_at = NULL WHERE id = :id AND user_paused = 1 AND state = 'PAUSED'") suspend fun resume(id: String): Int
-    @Query("UPDATE collections SET run_id = NULL, state = 'WAITING_AUTH', current_post_id = NULL, next_retry_at = NULL WHERE pool_id IS NULL AND user_paused = 0") suspend fun suspendForAuthentication()
+    @Query("UPDATE collections SET run_id = NULL, state = 'WAITING_AUTH', current_post_id = NULL, next_retry_at = NULL WHERE pool_id IS NULL AND user_paused = 0 AND sync_mode = 'FULL'") suspend fun suspendForAuthentication()
+    @Query("UPDATE download_tasks SET status = 'PENDING', bytes_downloaded = 0 WHERE status = 'DOWNLOADING' AND collection_id IN (SELECT id FROM collections WHERE sync_mode = 'FULL')")
+    suspend fun recoverApiTasks()
+    @Query("UPDATE collections SET sync_mode = :mode WHERE id = :id AND pool_id IS NULL")
+    suspend fun setSyncMode(id: String, mode: String)
     @Query("UPDATE download_tasks SET status = 'PENDING', bytes_downloaded = 0 WHERE collection_id = :id AND status = 'DOWNLOADING'") suspend fun resetInterrupted(id: String)
     @Query("SELECT * FROM sync_checkpoints WHERE collection_id = :id") suspend fun checkpoint(id: String): CheckpointEntity?
     @Upsert suspend fun checkpoint(entity: CheckpointEntity)
     @Query("DELETE FROM sync_checkpoints WHERE collection_id = :id") suspend fun clearCheckpoint(id: String)
     @Query("UPDATE collections SET last_seen_post_id = MAX(last_seen_post_id, :watermark) WHERE id = :id AND run_id = :runId") suspend fun commitWatermark(id: String, runId: String, watermark: Long)
     @Query("SELECT * FROM posts WHERE id = :id") suspend fun post(id: Long): PostEntity?
+    @Query("SELECT * FROM local_files WHERE collection_id = :id AND post_id = :postId")
+    suspend fun localFile(id: String, postId: Long): LocalFileEntity?
+    @Query("UPDATE collections SET last_seen_post_id = 0, state = 'IDLE', last_error = NULL, next_retry_at = NULL, retry_attempts = 0 WHERE id = :id AND run_id IS NULL AND user_paused = 0 AND pool_id IS NULL")
+    suspend fun restartScan(id: String): Int
     @Upsert suspend fun post(entity: PostEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun membership(entity: MembershipEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun task(entity: TaskEntity)
@@ -65,7 +73,7 @@ interface LibraryDao {
 data class SummaryRow(val id: String, val source_post_id: Long, val last_seen_post_id: Long, val state: String,
     val current_post_id: Long?, val last_error: String?, val last_sync_at: Long?, val created_at: Long,
     val downloaded_count: Int, val pending_count: Int, val failed_count: Int, val current_bytes: Long,
-    val current_total: Long, val pool_id: Long?, val display_name: String?, val cover_url: String?, val next_retry_at: Long?)
+    val current_total: Long, val pool_id: Long?, val display_name: String?, val cover_url: String?, val next_retry_at: Long?, val sync_mode: String)
 
 data class GalleryRow(val collection_id: String, val post_id: Long, val file_url: String, val preview_url: String?,
     val local_uri: String?, val status: String, val error: String?)

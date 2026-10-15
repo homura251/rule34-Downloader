@@ -1,0 +1,103 @@
+name: Signed APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a new GitHub Release after verification
+        type: boolean
+        default: false
+  push:
+    tags: ['v[0-9]*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v6
+      - run: sdkmanager 'build-tools;36.0.0'
+      - name: Restore existing signing identity
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          names = ('ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD')
+          if any(not os.environ.get(n) for n in names):
+              raise SystemExit('Configure the four existing ANDROID signing secrets')
+          data = base64.b64decode(''.join(os.environ['ANDROID_KEYSTORE_BASE64'].split()), validate=True)
+          if not data:
+              raise SystemExit('Signing keystore is empty')
+          path = Path(os.environ['RUNNER_TEMP']) / 'release.jks'
+          path.touch(mode=0o600)
+          path.write_bytes(data)
+          PY
+      - name: Tests, lint and signed release
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon :domain:test :download:test testDebugUnitTest lintRelease assembleRelease
+      - name: Verify signature and version
+        id: apk
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+          python3 - <<'PY'
+          import os, re, shutil
+          from pathlib import Path
+          version = re.search(r'versionName\s*=\s*"([^"]+)"', Path('app/build.gradle.kts').read_text()).group(1)
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+              raise SystemExit('Invalid release version')
+          tag = f'v{version}'
+          if os.environ['GITHUB_REF_TYPE'] == 'tag' and os.environ['GITHUB_REF_NAME'] != tag:
+              raise SystemExit('Git tag does not match application version')
+          apk = f'rule34-Downloader-{tag}.apk'
+          shutil.copyfile('app/build/outputs/apk/release/app-release.apk', apk)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'file={apk}\ntag={tag}\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-apk
+          path: ${{ steps.apk.outputs.file }}
+          if-no-files-found: error
+      - name: Publish verified release
+        if: github.ref_type == 'tag' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.apk.outputs.tag }}
+          RELEASE_APK: ${{ steps.apk.outputs.file }}
+        run: |
+          options=()
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then options+=(--verify-tag); fi
+          gh release create "$RELEASE_TAG" "$RELEASE_APK" --target "$GITHUB_SHA" --title "Rule34 Downloader $RELEASE_TAG" --generate-notes "${options[@]}"
+      - name: Delete temporary signing file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"

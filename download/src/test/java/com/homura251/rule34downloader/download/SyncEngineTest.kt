@@ -12,10 +12,11 @@ class SyncEngineTest {
     private val repo = MemoryRepository()
     private val searched = mutableListOf<Long?>()
     private var search: suspend (Long?) -> List<Rule34Post> = { emptyList() }
+    private var fetchPost: suspend (Long) -> Rule34Post = { post(it) }
     private val catalog = object : CatalogGateway {
         override val pageSize = 2
         override suspend fun validate(credentials: ApiCredentials) = Unit
-        override suspend fun getPost(postId: Long) = post(postId)
+        override suspend fun getPost(postId: Long) = fetchPost(postId)
         override suspend fun resolveArtistTags(post: Rule34Post) = emptyList<Rule34Tag>()
         override suspend fun searchPosts(tag: String, afterPostId: Long, beforePostId: Long?): List<Rule34Post> {
             searched += beforePostId; return search(beforePostId)
@@ -37,16 +38,58 @@ class SyncEngineTest {
     private val reuse = object : FileReuse { override suspend fun lookup(record: DownloadRecord) = ReuseResult(reuseFile) }
     private fun engine() = SyncEngine(repo, catalog, downloader, reuse, now = { 10_000 })
 
+    @Test fun badDiscoveryResponseDoesNotStarveAlreadyDiscoveredFiles() = runTest {
+        repo.seed(post(1))
+        search = { throw SourceFailure(FailureKind.BAD_RESPONSE, "unexpected API response") }
+        assertTrue(engine().run("artist") is SyncOutcome.Retry)
+        assertEquals(listOf(1L), transferred)
+        assertEquals(DownloadStatus.DOWNLOADED, repo.rows.getValue(1).status)
+        assertEquals(0L, repo.collection.lastSeenPostId)
+    }
+
+    @Test fun oneForbiddenOriginalDoesNotPreventTheNextFileFromDownloading() = runTest {
+        repo.seed(post(1)); repo.seed(post(2))
+        transfer = { record, publish ->
+            if (record.postId == 1L) throw SourceFailure(FailureKind.BLOCKED, "original forbidden")
+            saved(record.postId).also { publish(it) }
+        }
+        assertTrue(engine().run("artist") is SyncOutcome.Retry)
+        assertEquals(listOf(1L, 2L), transferred)
+        assertEquals(DownloadStatus.DOWNLOADED, repo.rows.getValue(2).status)
+    }
+
+    @Test fun deletedLegacyMetadataIsIsolatedFromHealthyQueuedFiles() = runTest {
+        repo.seed(post(1).copy(fileUrl = "https://wimg.rule34.xxx/unknown.bin", md5 = ""))
+        repo.seed(post(2))
+        fetchPost = { if (it == 1L) throw SourceFailure(FailureKind.NOT_FOUND, "post deleted") else post(it) }
+        engine().run("artist")
+        assertEquals(listOf(2L), transferred)
+        assertEquals(DownloadStatus.FAILED, repo.rows.getValue(1).status)
+        assertEquals(DownloadStatus.DOWNLOADED, repo.rows.getValue(2).status)
+    }
+
+    @Test fun retryingAFailedFileRefreshesItsStaleMediaUrl() = runTest {
+        repo.seed(post(1).copy(fileUrl = "https://wimg.rule34.xxx/expired/$HASH.png"), DownloadStatus.FAILED)
+        transfer = { record, publish ->
+            assertEquals(post(1).fileUrl, record.fileUrl)
+            saved(record.postId).also { publish(it) }
+        }
+        assertEquals(SyncOutcome.Complete(1, 0), engine().run("artist"))
+    }
+
     @Test fun failedPageRetainsCheckpointWithoutAdvancingWatermark() = runTest {
         search = { before -> if (before == null) listOf(post(5), post(4)) else throw SourceFailure(FailureKind.NETWORK, "offline") }
         assertTrue(engine().run("artist") is SyncOutcome.Retry)
         assertEquals(0, repo.collection.lastSeenPostId)
         assertEquals(ScanCheckpoint(0, 4, 5), repo.scan)
         assertEquals(2, repo.rows.size)
-        assertTrue(transferred.isEmpty())
+        assertEquals(setOf(4L, 5L), transferred.toSet())
         searched.clear()
         search = { listOf(post(3)) }
-        assertEquals(SyncOutcome.Complete(3, 0), engine().run("artist"))
+        val reuse = object : FileReuse {
+            override suspend fun lookup(record: DownloadRecord) = ReuseResult(record.localUri?.let { SavedFile(it, 10, HASH) })
+        }
+        assertEquals(SyncOutcome.Complete(1, 0), SyncEngine(repo, catalog, downloader, reuse).run("artist"))
         assertEquals(listOf(4L), searched)
         assertEquals(5, repo.collection.lastSeenPostId)
         assertNull(repo.scan)
@@ -55,14 +98,14 @@ class SyncEngineTest {
 
     @Test fun ignoredPaginationCannotMarkScanComplete() = runTest {
         search = { listOf(post(5), post(4)) }
-        assertEquals(SyncOutcome.Blocked, engine().run("artist"))
+        assertTrue(engine().run("artist") is SyncOutcome.Retry)
         assertEquals(0, repo.collection.lastSeenPostId)
-        assertEquals(SyncState.BLOCKED, repo.collection.syncState)
-        assertTrue(transferred.isEmpty())
+        assertEquals(SyncState.WAITING_RETRY, repo.collection.syncState)
+        assertEquals(setOf(4L, 5L), transferred.toSet())
     }
     @Test fun unorderedPageCannotAdvanceWatermarkOrSkipHiddenPosts() = runTest {
         search = { listOf(post(4), post(5)) }
-        assertEquals(SyncOutcome.Blocked, engine().run("artist"))
+        assertTrue(engine().run("artist") is SyncOutcome.Retry)
         assertEquals(0L, repo.collection.lastSeenPostId)
         assertTrue(repo.rows.isEmpty())
     }
@@ -90,6 +133,25 @@ class SyncEngineTest {
         assertEquals(SyncOutcome.Complete(0, 0), engine().run("artist"))
         assertTrue(transferred.isEmpty())
         assertEquals("content://old/1", repo.rows.getValue(1).localUri)
+    }
+
+    @Test fun emptyIncrementalScanStillDrainsThePersistedQueueAndReusesOldFiles() = runTest {
+        repo.collection = repo.collection.copy(lastSeenPostId = 61)
+        repo.seed(post(1), DownloadStatus.DOWNLOADED, "content://old/1")
+        repo.seed(post(2))
+        val reuse = object : FileReuse {
+            override suspend fun lookup(record: DownloadRecord) = ReuseResult(
+                if (record.postId == 1L) SavedFile("content://old/1", 10, HASH) else null)
+        }
+        assertEquals(SyncOutcome.Complete(1, 0), SyncEngine(repo, catalog, downloader, reuse).run("artist"))
+        assertEquals(listOf(2L), transferred)
+        assertEquals("content://old/1", repo.rows.getValue(1).localUri)
+        assertEquals(61L, repo.collection.lastSeenPostId)
+        assertNull(repo.scan)
+        assertEquals(SyncOutcome.Complete(0, 0), SyncEngine(repo, catalog, downloader, object : FileReuse {
+            override suspend fun lookup(record: DownloadRecord) = ReuseResult(SavedFile(record.localUri!!, 10, HASH))
+        }).run("artist"))
+        assertEquals(listOf(2L), transferred)
     }
 
     @Test fun cancellationResetsPartialFileButKeepsUserPausedIntent() = runTest {
@@ -126,6 +188,14 @@ class SyncEngineTest {
         assertEquals(250_000L, repo.nextRetry)
         assertEquals(0, repo.collection.lastSeenPostId)
     }
+    @Test fun mediaFailureCannotShortenThePendingApiRetryAfter() = runTest {
+        repo.seed(post(1))
+        search = { throw SourceFailure(FailureKind.RATE_LIMIT, "API slow down", 240_000) }
+        transfer = { _, _ -> throw SourceFailure(FailureKind.NETWORK, "CDN disconnected") }
+        assertEquals(SyncOutcome.Retry(240_000), engine().run("artist"))
+        assertEquals(250_000L, repo.nextRetry)
+        assertEquals(0L, repo.collection.lastSeenPostId)
+    }
 
     @Test fun authenticationFailureLeavesQueueAndFilesIntact() = runTest {
         repo.seed(post(1), DownloadStatus.DOWNLOADED, "content://old/1")
@@ -151,6 +221,60 @@ class SyncEngineTest {
         assertEquals(SyncOutcome.Skipped, engine().run("artist"))
         assertTrue(searched.isEmpty())
     }
+
+    @Test fun manualKnownFileDownloadNeverUsesTheApiOrChangesTheScanCheckpoint() = runTest {
+        repo.collection = repo.collection.copy(lastSeenPostId = 7)
+        repo.scan = ScanCheckpoint(7, 10, 12)
+        repo.seed(post(1))
+        search = { error("Known-file recovery must not call the API") }
+        fetchPost = { error("Known-file recovery must not fetch metadata") }
+        assertEquals(SyncOutcome.Complete(1, 0), engine().run("artist", mode = SyncMode.KNOWN_FILES))
+        assertTrue(searched.isEmpty())
+        assertEquals(7L, repo.collection.lastSeenPostId)
+        assertEquals(ScanCheckpoint(7, 10, 12), repo.scan)
+        assertEquals(SyncState.QUEUE_COMPLETE, repo.collection.syncState)
+    }
+
+    @Test fun anUnavailableOriginalDoesNotDiscardTheOtherPostsOnItsPage() = runTest {
+        val unavailable = post(1).copy(fileUrl = "", availabilityError = "Original not currently available")
+        search = { before -> if (before == null) listOf(post(2), unavailable) else emptyList() }
+        fetchPost = { if (it == 1L) throw SourceFailure(FailureKind.BAD_RESPONSE, "Original not currently available") else post(it) }
+        assertTrue(engine().run("artist") is SyncOutcome.Retry)
+        assertEquals(listOf(2L), transferred)
+        assertEquals(DownloadStatus.DOWNLOADED, repo.rows.getValue(2).status)
+        assertEquals(DownloadStatus.FAILED, repo.rows.getValue(1).status)
+        assertEquals(2L, repo.collection.lastSeenPostId)
+        assertEquals(setOf(1L, 2L), repo.rows.keys)
+    }
+
+    @Test fun knownFileRetryPreservesItsModeInsteadOfReenteringDiscovery() = runTest {
+        repo.seed(post(1))
+        search = { error("Retry must preserve known-file mode") }
+        transfer = { _, _ -> throw SourceFailure(FailureKind.NETWORK, "temporary disconnect") }
+        val retry = engine().run("artist", mode = SyncMode.KNOWN_FILES) as SyncOutcome.Retry
+        assertEquals(SyncMode.KNOWN_FILES, retry.mode)
+        transfer = { record, publish -> saved(record.postId).also { publish(it) } }
+        assertEquals(SyncOutcome.Complete(1, 0), engine().run("artist", mode = retry.mode))
+        assertTrue(searched.isEmpty())
+    }
+
+    @Test fun invalidDiscoveryAutomaticallyRetriesTwiceThenExposesManualRecovery() = runTest {
+        search = { throw SourceFailure(FailureKind.BAD_RESPONSE, "response format changed") }
+        assertTrue(engine().run("artist") is SyncOutcome.Retry)
+        assertTrue(engine().run("artist") is SyncOutcome.Retry)
+        assertEquals(SyncOutcome.Blocked, engine().run("artist"))
+        assertEquals(SyncState.SCAN_INCOMPLETE, repo.collection.syncState)
+        assertEquals(0L, repo.collection.lastSeenPostId)
+    }
+
+    @Test fun widespreadForbiddenMediaStopsAfterThreeFilesAndRetainsTheRemainder() = runTest {
+        (1L..5).forEach { repo.seed(post(it)) }
+        transfer = { _, _ -> throw SourceFailure(FailureKind.BLOCKED, "forbidden") }
+        assertEquals(SyncOutcome.Blocked, engine().run("artist"))
+        assertEquals(listOf(1L, 2L, 3L), transferred)
+        assertEquals(DownloadStatus.PENDING, repo.rows.getValue(4).status)
+        assertEquals(DownloadStatus.PENDING, repo.rows.getValue(5).status)
+    }
     companion object {
         const val HASH = "0123456789abcdef0123456789abcdef"
         fun post(id: Long) = Rule34Post(id, "https://wimg.rule34.xxx/$HASH.png", HASH, listOf("artist"))
@@ -175,10 +299,10 @@ private class MemoryRepository : SyncRepository {
     override suspend fun addCollection(tag: String, sourcePostId: Long) = false
     override suspend fun removeCollection(id: String) = Unit
     override suspend fun gallery(query: GalleryQuery, offset: Int, limit: Int) = GalleryPage(emptyList(), 0)
-    override suspend fun beginRun(id: String, runId: String): Boolean { lease = runId; return true }
+    override suspend fun beginRun(id: String, runId: String): Boolean { if (lease != null) return false; lease = runId; return true }
     override suspend fun setState(id: String, runId: String, state: SyncState, error: String?, nextRetryAt: Long?) {
         if (lease == runId && !collection.paused) {
-            collection = collection.copy(syncState = state, retryAttempts = if (state == SyncState.WAITING_RETRY) collection.retryAttempts + 1 else collection.retryAttempts)
+            collection = collection.copy(syncState = state, retryAttempts = if (state in setOf(SyncState.WAITING_RETRY, SyncState.WAITING_NETWORK)) collection.retryAttempts + 1 else if (state == SyncState.COMPLETE) 0 else collection.retryAttempts)
             nextRetry = nextRetryAt
         }
     }
@@ -196,10 +320,19 @@ private class MemoryRepository : SyncRepository {
     }
     override suspend fun checkpoint(id: String) = scan
     override suspend fun savePage(id: String, runId: String, posts: List<Rule34Post>, checkpoint: ScanCheckpoint) {
-        posts.filterNot { rows.containsKey(it.id) }.forEach { seed(it) }; scan = checkpoint
+        posts.filterNot { rows.containsKey(it.id) }.forEach {
+            seed(it, if (it.availabilityError == null) DownloadStatus.PENDING else DownloadStatus.FAILED)
+            rows[it.id] = rows.getValue(it.id).copy(error = it.availabilityError)
+        }; scan = checkpoint
     }
     override suspend fun commitScan(id: String, runId: String, watermark: Long) { collection = collection.copy(lastSeenPostId = watermark); scan = null }
-    override suspend fun repairMetadata(id: String, runId: String, post: Rule34Post) { rows[post.id] = rows.getValue(post.id).copy(md5 = post.md5) }
+    override suspend fun restartScan(id: String): Boolean {
+        if (lease != null || collection.paused) return false
+        collection = collection.copy(lastSeenPostId = 0, syncState = SyncState.IDLE); scan = null
+        return true
+    }
+    override suspend fun setSyncMode(id: String, mode: SyncMode) { collection = collection.copy(syncMode = mode) }
+    override suspend fun repairMetadata(id: String, runId: String, post: Rule34Post) { rows[post.id] = rows.getValue(post.id).copy(md5 = post.md5, fileUrl = post.fileUrl) }
     override suspend fun records(id: String) = rows.values.sortedBy { it.postId }
     override suspend fun queue(id: String) = records(id).filter { it.status != DownloadStatus.DOWNLOADED && it.attempts < 3 }
     override suspend fun markDownloading(id: String, runId: String, postId: Long, total: Long) { rows[postId] = rows.getValue(postId).copy(status = DownloadStatus.DOWNLOADING) }

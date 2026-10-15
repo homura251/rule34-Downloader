@@ -24,6 +24,9 @@ class SubscriptionsViewModel(private val library: LibraryRepository, private val
     val collections = library.observeCollections().catch { notify("读取资料库失败，请重试。"); emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     fun sync(id: String) = action { tasks.sync(id) }
+    fun downloadKnown(id: String) = action { tasks.downloadKnown(id) }
+    fun rescan(id: String) = action { tasks.rescan(id) }
+    fun resume(id: String) = action { tasks.resume(id) }
     fun pause(id: String) = action { tasks.pause(id) }
     fun remove(id: String) = action { tasks.remove(id); notify("订阅已移除，已下载文件保留。") }
 }
@@ -84,6 +87,9 @@ class TasksViewModel(private val library: LibraryRepository, private val tasks: 
     fun resumeAll() = action { tasks.resumeAll() }
     fun retryFailed() = action { tasks.retryFailed() }
     fun sync(id: String) = action { tasks.sync(id) }
+    fun downloadKnown(id: String) = action { tasks.downloadKnown(id) }
+    fun rescan(id: String) = action { tasks.rescan(id) }
+    fun resume(id: String) = action { tasks.resume(id) }
     fun pause(id: String) = action { tasks.pause(id) }
 }
 

@@ -22,6 +22,7 @@ data class CollectionEntity(
     @ColumnInfo(name = "next_retry_at") val nextRetryAt: Long? = null,
     @ColumnInfo(name = "created_at") val createdAt: Long,
     @ColumnInfo(name = "retry_attempts") val retryAttempts: Int = 0,
+    @ColumnInfo(name = "sync_mode", defaultValue = "'FULL'") val syncMode: String = "FULL",
 )
 
 @Entity(tableName = "posts")

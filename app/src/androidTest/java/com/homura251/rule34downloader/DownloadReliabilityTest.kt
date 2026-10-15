@@ -55,6 +55,16 @@ class DownloadReliabilityTest {
         assertEquals(0, rows())
     }
 
+    @Test fun historicalVerifiedChecksumCanRestoreAMissingFileWithoutNewApiMetadata() = runBlocking {
+        val legacy = record().copy(fileUrl = "https://wimg.rule34.xxx/legacy/original.png", md5 = "", verifiedMd5 = hash)
+        val saved = MediaStoreDownloader(context, source).download(legacy, {}, { _, _ -> }, {})
+        try {
+            assertEquals(hash, saved.verifiedMd5)
+            assertEquals(hash, TestApiOrigin.md5(context.contentResolver.openInputStream(Uri.parse(saved.uri))!!.use { it.readBytes() }))
+            assertEquals(0, pending())
+        } finally { context.contentResolver.delete(Uri.parse(saved.uri), null, null) }
+    }
+
     @Test fun cancellationAtPublicationStillFinishesPersistenceCallback() = runBlocking {
         val published = CompletableDeferred<SavedFile>()
         val finish = CompletableDeferred<Unit>()

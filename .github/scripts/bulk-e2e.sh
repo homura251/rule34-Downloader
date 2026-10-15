@@ -17,7 +17,7 @@ collect() {
 trap collect EXIT
 
 ./gradlew --stacktrace -PbulkSiteTest=true assembleDebug assembleDebugAndroidTest
-android --no-metrics --sdk="$ANDROID_HOME" install --apks="$app_apk" --install-options=-g
+adb install -r -g "$app_apk"
 adb install -r "$test_apk"
 
 run_phase() {
@@ -91,17 +91,16 @@ from pathlib import Path
 files=Path('app/build/bulk-e2e-evidence/retained-old-files.txt').read_text().splitlines()
 assert len(files)==2998, f'Expected 2998 retained old files after 2 deliberate deletions, found {len(files)}'
 PY
-android --no-metrics --sdk="$ANDROID_HOME" install --apks="$app_apk" --install-options=-g
+adb install -r -g "$app_apk"
 adb install -r "$test_apk"
 run_phase restore 3000
 adb shell am start -W -n "$app_package/.MainActivity"
-android --no-metrics --sdk="$ANDROID_HOME" layout --full --output=app/build/bulk-e2e-evidence/complete-after-reinstall.json
-android --no-metrics --sdk="$ANDROID_HOME" screen capture --output=app/build/bulk-e2e-evidence/complete-after-reinstall.png
+adb shell uiautomator dump /sdcard/rule34-layout.xml
+adb pull /sdcard/rule34-layout.xml app/build/bulk-e2e-evidence/complete-after-reinstall.xml
+adb exec-out screencap -p > app/build/bulk-e2e-evidence/complete-after-reinstall.png
 python3 - <<'PY_CHECK'
-import json
 from pathlib import Path
-layout=json.loads(Path('app/build/bulk-e2e-evidence/complete-after-reinstall.json').read_text())
-text=json.dumps(layout,ensure_ascii=False)
+text=Path('app/build/bulk-e2e-evidence/complete-after-reinstall.xml').read_text()
 assert '3168' in text or '3,168' in text, 'Three restored author folders (3000 + 84 + 84 files) missing from actual app UI'
 PY_CHECK
 collect

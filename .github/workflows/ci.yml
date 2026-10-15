@@ -1,0 +1,175 @@
+name: Android checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      live_api:
+        description: Test the real API using RULE34_USER_ID and RULE34_API_KEY secrets
+        type: boolean
+        default: false
+      bulk_restore:
+        description: Run the 3000-file process-death and reinstall regression
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '17'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Prepare build tools (AGP installs Platform 37.0)
+        run: sdkmanager 'build-tools;36.0.0'
+      - name: Tests, lint and APKs
+        run: ./gradlew --no-daemon :domain:test :download:test testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest
+      - name: Upload installable debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rule34-Downloader-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+            **/build/reports/lint-results-*
+
+  device:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Prepare build tools (AGP installs Platform 37.0)
+        run: sdkmanager 'build-tools;36.0.0'
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: UI, pause/resume, MediaStore and folder recovery
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash .github/scripts/controlled-e2e.sh
+      - name: Upload device evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-regression
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+            app/build/e2e-evidence/
+
+  live-api:
+    if: github.event_name == 'workflow_dispatch' && inputs.live_api
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v6
+      - run: sdkmanager 'build-tools;36.0.0'
+      - name: Real API and original-file integrity
+        env:
+          RULE34_LIVE_TESTS: 'true'
+          RULE34_USER_ID: ${{ secrets.RULE34_USER_ID }}
+          RULE34_API_KEY: ${{ secrets.RULE34_API_KEY }}
+        run: |
+          test -n "$RULE34_USER_ID" && test -n "$RULE34_API_KEY" || { echo 'Configure RULE34_USER_ID and RULE34_API_KEY repository secrets'; exit 1; }
+          ./gradlew --no-daemon :data:testDebugUnitTest --tests '*Rule34Live*Test' --rerun-tasks
+      - name: Upload sanitized live test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-api-report
+          path: data/build/reports/tests/testDebugUnitTest/
+
+  bulk-restore:
+    if: github.event_name == 'workflow_dispatch' && inputs.bulk_restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v6
+      - run: sdkmanager 'build-tools;36.0.0'
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash .github/scripts/bulk-e2e.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bulk-restore-evidence
+          path: app/build/bulk-e2e-evidence/
