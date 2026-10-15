@@ -75,8 +75,20 @@ class RecoveryUiEndToEndTest {
             assertEquals(healthy, known.filter { it.postId != 1L }.associate { it.postId to it.localUri })
             assertNotNull(read { graph.library.checkpoint(tag) })
 
-            // Enable an account without the automatic recovery hook: exercise the explicit UI rescan command.
-            read { graph.account.save(ApiCredentials("42", "fixture-key")) }
+            // "Continue" keeps the saved mode, while "retry scan" must explicitly switch to FULL.
+            read {
+                graph.account.save(ApiCredentials("42", "fixture-key"))
+                graph.background.pause(tag)
+            }
+            wait { read { graph.library.getCollection(tag) }?.syncState == SyncState.PAUSED && workFinished() }
+            ui.onNodeWithTag("nav-subscriptions").performClick()
+            ui.onNodeWithTag("recovery-$tag").performScrollTo().performClick()
+            ui.onNodeWithTag("retry-scan-$tag").performClick()
+            wait {
+                val collection = read { graph.library.getCollection(tag) }
+                collection?.syncMode == SyncMode.FULL && collection.syncState == SyncState.WAITING_RETRY && origin.lists.get() > pages
+            }
+            assertEquals(known.map { it.localUri }, read { graph.library.records(tag) }.map { it.localUri })
             origin.brokenLists.remove(tag)
             ui.onNodeWithTag("recovery-$tag").performScrollTo().performClick()
             ui.onNodeWithText("扫描异常表示作品列表尚未确认完整，不表示已下载文件损坏。可以先下载已发现文件，再重试扫描。").assertExists()

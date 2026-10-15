@@ -100,6 +100,7 @@ fun SubscriptionsScreen(viewModel: SubscriptionsViewModel, account: AccountState
         items(collections, key = { it.tag }) { collection ->
             CollectionCard(collection, account.canUseApi, onBrowse = { onBrowse(collection.tag) }, onRemove = { removing = collection },
                 onSync = { onRequestNotifications(); if (collection.syncState == SyncState.PAUSED) viewModel.resume(collection.tag) else viewModel.sync(collection.tag) }, onPause = { viewModel.pause(collection.tag) },
+                onRetryScan = { onRequestNotifications(); viewModel.sync(collection.tag) },
                 onDownloadKnown = { onRequestNotifications(); viewModel.downloadKnown(collection.tag) },
                 onRescan = { onRequestNotifications(); viewModel.rescan(collection.tag) }, onSettings = onSettings)
         }
@@ -122,7 +123,7 @@ private fun Metric(label: String, value: String) {
 
 @Composable
 private fun CollectionCard(collection: CollectionSummary, canUseApi: Boolean, onBrowse: () -> Unit, onRemove: () -> Unit,
-    onSync: () -> Unit, onPause: () -> Unit, onDownloadKnown: () -> Unit, onRescan: () -> Unit, onSettings: () -> Unit) {
+    onSync: () -> Unit, onPause: () -> Unit, onRetryScan: () -> Unit, onDownloadKnown: () -> Unit, onRescan: () -> Unit, onSettings: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().testTag("artist-${collection.tag}")) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -160,7 +161,7 @@ private fun CollectionCard(collection: CollectionSummary, canUseApi: Boolean, on
                     Text(if (collection.syncState.stoppable) "暂停" else if (collection.syncState == SyncState.PAUSED) "继续" else "同步")
                 }
             }
-            TaskRecoveryActions(collection, canUseApi, onSync, onDownloadKnown, onRescan, onSettings)
+            TaskRecoveryActions(collection, canUseApi, onRetryScan, onDownloadKnown, onRescan, onSettings)
         }
     }
 }
