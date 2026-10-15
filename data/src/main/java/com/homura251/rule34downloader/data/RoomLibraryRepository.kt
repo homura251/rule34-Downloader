@@ -15,7 +15,7 @@ class RoomLibraryRepository(private val database: LibraryDatabase) : SyncReposit
 
     override fun observeCollections() = dao.summaries(SimpleSQLiteQuery("""
         SELECT c.id, c.source_post_id, c.last_seen_post_id, c.state, c.current_post_id, c.last_error,
-            c.last_sync_at, c.created_at, c.pool_id, c.display_name, c.next_retry_at,
+            c.last_sync_at, c.created_at, c.pool_id, c.display_name, c.next_retry_at, c.sync_mode,
             COALESCE(SUM(t.status = 'DOWNLOADED'), 0) AS downloaded_count,
             COALESCE(SUM(t.status IN ('PENDING', 'DOWNLOADING')), 0) AS pending_count,
             COALESCE(SUM(t.status = 'FAILED'), 0) AS failed_count,
@@ -32,7 +32,7 @@ class RoomLibraryRepository(private val database: LibraryDatabase) : SyncReposit
         CollectionSummary(row.id, row.source_post_id, row.last_seen_post_id, state(row.state), row.current_post_id,
             row.last_error, row.last_sync_at, row.created_at, row.downloaded_count, row.pending_count,
             row.failed_count, row.current_bytes, row.current_total, row.pool_id, row.display_name,
-            row.cover_url, row.next_retry_at)
+            row.cover_url, row.next_retry_at, mode(row.sync_mode))
     } }
 
     override suspend fun getCollection(id: String) = dao.collection(id)?.domain()
@@ -83,24 +83,37 @@ class RoomLibraryRepository(private val database: LibraryDatabase) : SyncReposit
     override suspend fun requestPause(id: String) = dao.pause(id)
     override suspend fun finishPause(id: String) = dao.finishPause(id)
     override suspend fun resume(id: String) = dao.resume(id) > 0
-    override suspend fun suspendForAuthentication() = database.withTransaction { dao.recoverTasks(); dao.suspendForAuthentication() }
+    override suspend fun suspendForAuthentication() = database.withTransaction { dao.recoverApiTasks(); dao.suspendForAuthentication() }
+    override suspend fun setSyncMode(id: String, mode: SyncMode) = dao.setSyncMode(id, mode.name)
     override suspend fun endRun(id: String, runId: String) = guarded(id, runId) { dao.resetInterrupted(id); dao.endRun(id, runId) }
     override suspend fun resetInterrupted(id: String, runId: String) = guarded(id, runId) { dao.resetInterrupted(id) }
     override suspend fun checkpoint(id: String) = dao.checkpoint(id)?.let { ScanCheckpoint(it.lowerWatermark, it.beforeId, it.maxSeenId) }
 
     override suspend fun savePage(id: String, runId: String, posts: List<Rule34Post>, checkpoint: ScanCheckpoint) = guarded(id, runId) {
-        posts.forEach { savePost(it); dao.membership(MembershipEntity(id, it.id)); dao.task(TaskEntity(id, it.id, updatedAt = System.currentTimeMillis())) }
+        posts.forEach {
+            savePost(it)
+            dao.membership(MembershipEntity(id, it.id))
+            dao.task(TaskEntity(id, it.id, status = if (it.availabilityError == null) "PENDING" else "FAILED",
+                error = it.availabilityError, updatedAt = System.currentTimeMillis()))
+        }
         dao.checkpoint(CheckpointEntity(id, checkpoint.lowerWatermark, checkpoint.beforeId, checkpoint.maxSeenId))
     }
     override suspend fun commitScan(id: String, runId: String, watermark: Long) = guarded(id, runId) {
         dao.commitWatermark(id, runId, watermark); dao.clearCheckpoint(id)
     }
+    override suspend fun restartScan(id: String): Boolean = database.withTransaction {
+        if (dao.restartScan(id) == 0) false else {
+            dao.clearCheckpoint(id)
+            dao.resetFailures(id)
+            true
+        }
+    }
     override suspend fun repairMetadata(id: String, runId: String, post: Rule34Post) = guarded(id, runId) { savePost(post) }
     private suspend fun savePost(post: Rule34Post) {
         val old = dao.post(post.id)
-        dao.post(PostEntity(post.id, post.fileUrl, post.previewUrl ?: old?.previewUrl,
+        dao.post(PostEntity(post.id, post.fileUrl.ifBlank { old?.fileUrl.orEmpty() }, post.previewUrl ?: old?.previewUrl,
             FileChecksum.normalize(post.md5) ?: old?.md5.orEmpty(), post.width ?: old?.width,
-            post.height ?: old?.height, post.tags.joinToString(" ")))
+            post.height ?: old?.height, post.tags.joinToString(" ").ifBlank { old?.tags.orEmpty() }))
     }
 
     override suspend fun records(id: String): List<DownloadRecord> = dao.records(SimpleSQLiteQuery("""
@@ -125,7 +138,14 @@ class RoomLibraryRepository(private val database: LibraryDatabase) : SyncReposit
         require(file.bytes > 0 && FileChecksum.normalize(file.verifiedMd5) != null)
         dao.file(LocalFileEntity(id, postId, file.uri, file.bytes, file.verifiedMd5)); dao.downloaded(id, postId, file.bytes, System.currentTimeMillis())
     }
-    override suspend fun invalidateFile(id: String, runId: String, postId: Long) = guarded(id, runId) { dao.removeFile(id, postId); dao.invalidate(id, postId) }
+    override suspend fun invalidateFile(id: String, runId: String, postId: Long) = guarded(id, runId) {
+        val post = dao.post(postId)
+        val verified = dao.localFile(id, postId)?.verifiedMd5?.let(FileChecksum::normalize)
+        if (post != null && FileChecksum.normalize(post.md5) == null && verified != null)
+            dao.post(post.copy(md5 = verified))
+        dao.removeFile(id, postId)
+        dao.invalidate(id, postId)
+    }
     override suspend fun markFailed(id: String, runId: String, postId: Long, error: String) = guarded(id, runId) { dao.failed(id, postId, error.take(500), System.currentTimeMillis()) }
     override suspend fun resetFailures(id: String) = dao.resetFailures(id)
     override suspend fun markQueued(id: String) = dao.markQueued(id)
@@ -134,7 +154,8 @@ class RoomLibraryRepository(private val database: LibraryDatabase) : SyncReposit
     private suspend fun guarded(id: String, runId: String, action: suspend () -> Unit) {
         database.withTransaction { if (dao.ownsRun(id, runId) > 0) action() }
     }
-    private fun CollectionEntity.domain() = CollectionRecord(id, sourcePostId, lastSeenPostId, userPaused, poolId, displayName, state(state), retryAttempts)
+    private fun CollectionEntity.domain() = CollectionRecord(id, sourcePostId, lastSeenPostId, userPaused, poolId, displayName, state(state), retryAttempts, mode(syncMode))
+    private fun mode(value: String) = SyncMode.entries.firstOrNull { it.name == value } ?: SyncMode.FULL
     private fun state(value: String) = runCatching { SyncState.valueOf(value) }.getOrDefault(SyncState.IDLE)
     companion object {
         fun create(context: android.content.Context) = RoomLibraryRepository(LibraryDatabase.open(context))

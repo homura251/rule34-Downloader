@@ -47,6 +47,8 @@ internal val SyncState.label: String get() = when (this) {
     SyncState.PAUSING -> "暂停中"
     SyncState.PAUSED -> "已暂停"
     SyncState.COMPLETE -> "已完成"
+    SyncState.SCAN_INCOMPLETE -> "扫描待恢复"
+    SyncState.QUEUE_COMPLETE -> "已发现文件已下载"
     SyncState.ERROR -> "有失败项目"
     SyncState.WAITING_AUTH -> "等待 API 验证"
     SyncState.WAITING_NETWORK -> "等待网络"
@@ -63,7 +65,7 @@ internal fun AccountBanner(account: AccountState, onSettings: () -> Unit) {
             Icon(Icons.Rounded.Key, null)
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(if (account.status == AccountStatus.INVALID) "API 凭据需要验证" else "连接 API 后开始同步", fontWeight = FontWeight.SemiBold)
-                Text("本地作品仍可浏览。", style = MaterialTheme.typography.bodySmall)
+                Text("本地作品仍可浏览，已发现文件可继续下载。", style = MaterialTheme.typography.bodySmall)
             }
             TextButton(onSettings) { Text("配置") }
         }
@@ -97,7 +99,9 @@ fun SubscriptionsScreen(viewModel: SubscriptionsViewModel, account: AccountState
         }
         items(collections, key = { it.tag }) { collection ->
             CollectionCard(collection, account.canUseApi, onBrowse = { onBrowse(collection.tag) }, onRemove = { removing = collection },
-                onSync = { onRequestNotifications(); viewModel.sync(collection.tag) }, onPause = { viewModel.pause(collection.tag) })
+                onSync = { onRequestNotifications(); if (collection.syncState == SyncState.PAUSED) viewModel.resume(collection.tag) else viewModel.sync(collection.tag) }, onPause = { viewModel.pause(collection.tag) },
+                onDownloadKnown = { onRequestNotifications(); viewModel.downloadKnown(collection.tag) },
+                onRescan = { onRequestNotifications(); viewModel.rescan(collection.tag) }, onSettings = onSettings)
         }
     }
     removing?.let { collection ->
@@ -118,7 +122,7 @@ private fun Metric(label: String, value: String) {
 
 @Composable
 private fun CollectionCard(collection: CollectionSummary, canUseApi: Boolean, onBrowse: () -> Unit, onRemove: () -> Unit,
-    onSync: () -> Unit, onPause: () -> Unit) {
+    onSync: () -> Unit, onPause: () -> Unit, onDownloadKnown: () -> Unit, onRescan: () -> Unit, onSettings: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().testTag("artist-${collection.tag}")) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -146,22 +150,24 @@ private fun CollectionCard(collection: CollectionSummary, canUseApi: Boolean, on
                 Text("${collection.downloadedCount} 已下载 · ${collection.pendingCount} 待下载", style = MaterialTheme.typography.labelMedium)
             }
             collection.lastSyncAt?.let { Text("最近同步 ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            collection.lastError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onBrowse, modifier = Modifier.weight(1f)) { Text("查看作品") }
                 if (collection.poolId == null) OutlinedButton(
                     onClick = if (collection.syncState.stoppable) onPause else onSync,
-                    enabled = collection.syncState != SyncState.PAUSING && (collection.syncState.stoppable || canUseApi),
+                    enabled = collection.syncState != SyncState.PAUSING && (collection.syncState.stoppable || canUseApi || (collection.syncState == SyncState.PAUSED && collection.syncMode == SyncMode.KNOWN_FILES)),
                     modifier = Modifier.weight(1f).testTag("sync-${collection.tag}")) {
                     Text(if (collection.syncState.stoppable) "暂停" else if (collection.syncState == SyncState.PAUSED) "继续" else "同步")
                 }
             }
+            TaskRecoveryActions(collection, canUseApi, onSync, onDownloadKnown, onRescan, onSettings)
         }
     }
 }
 
 @Composable
 internal fun StatusBadge(state: SyncState) {
-    val error = state in setOf(SyncState.ERROR, SyncState.BLOCKED, SyncState.WAITING_AUTH)
+    val error = state in setOf(SyncState.ERROR, SyncState.BLOCKED, SyncState.SCAN_INCOMPLETE, SyncState.WAITING_AUTH)
     Surface(shape = MaterialTheme.shapes.small, color = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer) {
         Text(state.label, Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelSmall,
             color = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer)
@@ -169,7 +175,8 @@ internal fun StatusBadge(state: SyncState) {
 }
 
 @Composable
-fun TasksScreen(viewModel: TasksViewModel, canUseApi: Boolean, snackbar: SnackbarHostState, onRequestNotifications: () -> Unit) {
+fun TasksScreen(viewModel: TasksViewModel, canUseApi: Boolean, snackbar: SnackbarHostState, onRequestNotifications: () -> Unit,
+    onSettings: () -> Unit) {
     val collections by viewModel.collections.collectAsStateWithLifecycle()
     var filter by remember { mutableStateOf("全部") }
     ReportMessages(viewModel, snackbar)
@@ -177,7 +184,7 @@ fun TasksScreen(viewModel: TasksViewModel, canUseApi: Boolean, snackbar: Snackba
     val shown = jobs.filter { when (filter) {
         "进行中" -> it.syncState.active || it.syncState in setOf(SyncState.WAITING_NETWORK, SyncState.WAITING_RETRY, SyncState.PAUSING)
         "已暂停" -> it.syncState == SyncState.PAUSED
-        "需处理" -> it.failedCount > 0 || it.syncState in setOf(SyncState.ERROR, SyncState.BLOCKED, SyncState.WAITING_AUTH)
+        "需处理" -> it.failedCount > 0 || it.syncState in setOf(SyncState.ERROR, SyncState.BLOCKED, SyncState.SCAN_INCOMPLETE, SyncState.WAITING_AUTH)
         else -> true
     } }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -191,8 +198,8 @@ fun TasksScreen(viewModel: TasksViewModel, canUseApi: Boolean, snackbar: Snackba
         item {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(viewModel::pauseAll, enabled = jobs.any { it.syncState.pausable }) { Text("全部暂停") }
-                OutlinedButton({ onRequestNotifications(); viewModel.resumeAll() }, enabled = canUseApi && jobs.any { it.syncState == SyncState.PAUSED }) { Text("继续暂停任务") }
-                OutlinedButton({ onRequestNotifications(); viewModel.retryFailed() }, enabled = canUseApi && jobs.any { it.failedCount > 0 || it.syncState in setOf(SyncState.ERROR, SyncState.BLOCKED) }) { Text("重试失败") }
+                OutlinedButton({ onRequestNotifications(); viewModel.resumeAll() }, enabled = jobs.any { it.syncState == SyncState.PAUSED && (canUseApi || it.syncMode == SyncMode.KNOWN_FILES) }) { Text("继续暂停任务") }
+                OutlinedButton({ onRequestNotifications(); viewModel.retryFailed() }, enabled = canUseApi && jobs.any { it.failedCount > 0 || it.syncState in setOf(SyncState.ERROR, SyncState.BLOCKED, SyncState.SCAN_INCOMPLETE) }) { Text("重试失败") }
             }
         }
         item {
@@ -217,15 +224,20 @@ fun TasksScreen(viewModel: TasksViewModel, canUseApi: Boolean, snackbar: Snackba
                     collection.lastError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     collection.nextRetryAt?.let { Text("预计重试 ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it))}", style = MaterialTheme.typography.bodySmall) }
                     Row {
-                        TextButton(if (collection.syncState.stoppable) { { viewModel.pause(collection.tag) } } else { { onRequestNotifications(); viewModel.sync(collection.tag) } },
-                            enabled = collection.syncState != SyncState.PAUSING && (collection.syncState.stoppable || canUseApi)) {
+                        TextButton(if (collection.syncState.stoppable) { { viewModel.pause(collection.tag) } } else { { onRequestNotifications(); if (collection.syncState == SyncState.PAUSED) viewModel.resume(collection.tag) else viewModel.sync(collection.tag) } },
+                            enabled = collection.syncState != SyncState.PAUSING && (collection.syncState.stoppable || canUseApi || (collection.syncState == SyncState.PAUSED && collection.syncMode == SyncMode.KNOWN_FILES)),
+                            modifier = Modifier.testTag("task-sync-${collection.tag}")) {
                             Text(if (collection.syncState.stoppable) "暂停" else if (collection.syncState == SyncState.PAUSED) "继续" else "重新同步")
                         }
                         if (collection.syncState.pausable && !collection.syncState.stoppable)
                             TextButton({ viewModel.pause(collection.tag) }) { Text("暂停订阅") }
                         else if (collection.syncState in setOf(SyncState.WAITING_NETWORK, SyncState.WAITING_RETRY))
-                            TextButton({ onRequestNotifications(); viewModel.sync(collection.tag) }, enabled = canUseApi) { Text("立即重试") }
+                            TextButton({ onRequestNotifications(); if (collection.syncMode == SyncMode.KNOWN_FILES) viewModel.resume(collection.tag) else viewModel.sync(collection.tag) }, enabled = canUseApi || collection.syncMode == SyncMode.KNOWN_FILES) { Text("立即重试") }
                     }
+                    TaskRecoveryActions(collection, canUseApi,
+                        onRetry = { onRequestNotifications(); viewModel.sync(collection.tag) },
+                        onDownloadKnown = { onRequestNotifications(); viewModel.downloadKnown(collection.tag) },
+                        onRescan = { onRequestNotifications(); viewModel.rescan(collection.tag) }, onSettings = onSettings)
                 }
             }
         }

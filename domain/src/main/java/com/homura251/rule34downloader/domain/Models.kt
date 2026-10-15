@@ -17,7 +17,11 @@ enum class SyncState {
     DISCOVERING,
     VERIFYING,
     QUEUED,
+    SCAN_INCOMPLETE,
+    QUEUE_COMPLETE,
 }
+
+enum class SyncMode { FULL, KNOWN_FILES }
 
 enum class DownloadStatus {
     PENDING,
@@ -42,6 +46,7 @@ data class Rule34Post(
     val height: Int? = null,
     val previewUrl: String? = null,
     val tagInfo: List<Rule34Tag>? = null,
+    val availabilityError: String? = null,
 )
 
 data class Rule34Tag(
@@ -59,6 +64,7 @@ data class CollectionRecord(
     val displayName: String? = null,
     val syncState: SyncState = SyncState.IDLE,
     val retryAttempts: Int = 0,
+    val syncMode: SyncMode = SyncMode.FULL,
 )
 
 data class CollectionSummary(
@@ -79,6 +85,7 @@ data class CollectionSummary(
     val displayName: String? = null,
     val coverUrl: String? = null,
     val nextRetryAt: Long? = null,
+    val syncMode: SyncMode = SyncMode.FULL,
 ) {
     val title: String get() = displayName ?: tag
     val currentFileProgress: Float?

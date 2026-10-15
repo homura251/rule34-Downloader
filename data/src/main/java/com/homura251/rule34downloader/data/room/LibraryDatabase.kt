@@ -8,14 +8,20 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(entities = [CollectionEntity::class, PostEntity::class, MembershipEntity::class, TaskEntity::class,
-    LocalFileEntity::class, CheckpointEntity::class], version = 6, exportSchema = true)
+    LocalFileEntity::class, CheckpointEntity::class], version = 7, exportSchema = true)
 abstract class LibraryDatabase : RoomDatabase() {
     abstract fun libraryDao(): LibraryDao
 
     companion object {
         fun open(context: Context, name: String = "rule34_downloader.db"): LibraryDatabase =
             Room.databaseBuilder(context.applicationContext, LibraryDatabase::class.java, name)
-                .addMigrations(*(1..5).map { LegacyMigration(it) }.toTypedArray()).build()
+                .addMigrations(*(1..5).map { LegacyMigration(it) }.toTypedArray(), SYNC_MODE_MIGRATION).build()
+    }
+}
+
+private val SYNC_MODE_MIGRATION = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE collections ADD COLUMN sync_mode TEXT NOT NULL DEFAULT 'FULL'")
     }
 }
 

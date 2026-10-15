@@ -119,7 +119,7 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
                         }
                         composable("tasks") {
                             val model: TasksViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { TasksViewModel(services.library, services.tasks) } } })
-                            TasksScreen(model, account.canUseApi, snackbar, onRequestNotificationPermission)
+                            TasksScreen(model, account.canUseApi, snackbar, onRequestNotificationPermission, ::openSettings)
                         }
                         composable("settings") {
                             val model: SettingsViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { SettingsViewModel(services) } } })

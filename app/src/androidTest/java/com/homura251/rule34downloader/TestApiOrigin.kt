@@ -22,6 +22,8 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
     val mediaPauseId = AtomicLong(-1)
     val pagePauseBefore = AtomicLong(-1)
     val delayedPages = AtomicInteger()
+    val brokenLists: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    val forbiddenOriginals: MutableSet<Long> = ConcurrentHashMap.newKeySet()
     private val delayDeadline = AtomicLong(0)
     val server = MockWebServer()
     val bytes = (1L..count.toLong()).associateWith { id ->
@@ -47,6 +49,7 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
                     val payload = if (original) bytes[id] else bytes[if (count > 1) 2 else 1]
                     if (payload == null) return MockResponse().setResponseCode(404)
                     if (original) originals.getOrPut(id) { AtomicInteger() }.incrementAndGet()
+                    if (original && id in forbiddenOriginals) return MockResponse().setResponseCode(403)
                     return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(payload)).also {
                         if (original && mediaPauseId.compareAndSet(id, -1)) it.throttleBody(1, 500, TimeUnit.MILLISECONDS)
                     }
@@ -60,6 +63,7 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
                 if (tags.isBlank()) return json("[]") // Low-cost credential validation, without a collection scan.
                 lists.incrementAndGet()
                 val artist = tags.substringBefore(' ')
+                if (artist in brokenLists) return json("{}")
                 val artistCount = if (count > 200 && artist != tag &&
                     (artist == tag.replace("test_bulk_", "test_bulk_api_") || artist == tag.replace("test_bulk_", "test_bulk_crash_"))) 84 else count
                 val lower = Regex("id:>([0-9]+)").find(tags)?.groupValues?.get(1)?.toLong() ?: 0

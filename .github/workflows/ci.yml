@@ -2,7 +2,7 @@ name: Android checks
 
 on:
   push:
-    branches: [main, 'fix/**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -129,7 +129,7 @@ jobs:
           RULE34_API_KEY: ${{ secrets.RULE34_API_KEY }}
         run: |
           test -n "$RULE34_USER_ID" && test -n "$RULE34_API_KEY" || { echo 'Configure RULE34_USER_ID and RULE34_API_KEY repository secrets'; exit 1; }
-          ./gradlew --no-daemon :data:testDebugUnitTest --tests '*Rule34LiveApiTest' --rerun-tasks
+          ./gradlew --no-daemon :data:testDebugUnitTest --tests '*Rule34Live*Test' --rerun-tasks
       - name: Upload sanitized live test report
         if: always()
         uses: actions/upload-artifact@v4

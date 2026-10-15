@@ -39,8 +39,14 @@ class Rule34ApiClient(
             throw SourceFailure(FailureKind.AUTH, "请同时填写有效的 User ID 与 API Key。")
         request("post", mapOf("limit" to "1"), credentials)
     }
-    override suspend fun getPost(postId: Long): Rule34Post = request("post", mapOf("id" to "$postId", "limit" to "1", "fields" to "tag_info"))
-        .map(::parsePost).firstOrNull() ?: throw SourceFailure(FailureKind.NOT_FOUND, "帖子 #$postId 不存在或已删除。")
+    override suspend fun getPost(postId: Long): Rule34Post {
+        val posts = request("post", mapOf("id" to "$postId", "limit" to "1", "fields" to "tag_info")).map(::parsePost)
+        if (posts.isEmpty()) throw SourceFailure(FailureKind.NOT_FOUND, "帖子 #$postId 不存在或已删除。")
+        val post = posts.singleOrNull()?.takeIf { it.id == postId } ?: throw SourceFailure(FailureKind.BAD_RESPONSE,
+            "原站返回的帖子信息与请求 #$postId 不一致，未替换已保存的信息。")
+        post.availabilityError?.let { throw SourceFailure(FailureKind.BAD_RESPONSE, it) }
+        return post
+    }
 
     override suspend fun searchPosts(tag: String, afterPostId: Long, beforePostId: Long?): List<Rule34Post> {
         val boundary = beforePostId?.let { "id:<$it" } ?: afterPostId.takeIf { it > 0 }?.let { "id:>$it" }.orEmpty()
@@ -185,9 +191,9 @@ class Rule34ApiClient(
     private fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }
     private fun parsePost(json: JSONObject): Rule34Post {
         val id = json.optLong("id", -1)
-        val file = mediaUrl(json.optString("file_url")) ?: throw SourceFailure(FailureKind.BAD_RESPONSE,
-            "API 中的帖子 #$id 缺少有效的原文件地址，本次扫描未标记完成。")
         if (id <= 0) throw badResponse()
+        val file = mediaUrl(json.optString("file_url")).orEmpty()
+        val availability = if (file.isBlank()) "帖子 #$id 的原文件地址暂不可用。该帖子会单独保留待处理，其他作品可继续下载。" else null
         val tags = json.optString("tags").split(Regex("\\s+")).filter(String::isNotBlank)
         val typed = when (val info = json.opt("tag_info")) {
             is JSONObject -> info.keys().asSequence().mapNotNull { name ->
@@ -201,7 +207,7 @@ class Rule34ApiClient(
         val md5 = FileChecksum.normalize(json.optString("md5")) ?: FileChecksum.normalize(json.optString("hash"))
             ?: FileChecksum.expected("", file).orEmpty()
         return Rule34Post(id, file, md5, tags, json.optInt("width").takeIf { it > 0 },
-            json.optInt("height").takeIf { it > 0 }, mediaUrl(json.optString("preview_url")) ?: mediaUrl(json.optString("sample_url")), typed)
+            json.optInt("height").takeIf { it > 0 }, mediaUrl(json.optString("preview_url")) ?: mediaUrl(json.optString("sample_url")), typed, availability)
     }
     private fun parseTag(json: JSONObject): Rule34Tag? = json.optString("name").ifBlank { json.optString("tag") }.takeIf(String::isNotBlank)?.let {
         Rule34Tag(it, tagType(json.opt("type")), json.optLong("count"))
@@ -221,5 +227,6 @@ class Rule34ApiClient(
         if (url.isHttps) return url.toString()
         return if (url.host == "rule34.xxx" || url.host.endsWith(".rule34.xxx")) url.newBuilder().scheme("https").build().toString() else null
     }
-    private fun badResponse() = SourceFailure(FailureKind.BAD_RESPONSE, "API 数据不完整，本次扫描未标记完成。")
+    private fun badResponse() = SourceFailure(FailureKind.BAD_RESPONSE,
+        "暂时无法确认作品列表，API 响应为空或格式异常。已保留扫描进度，可重试扫描或先下载已发现文件。")
 }

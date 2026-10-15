@@ -41,9 +41,21 @@ class Rule34ApiClientTest {
         client.searchPosts("artist", 20, 50)
         assertEquals("artist sort:id:desc id:<50", server.takeRequest().requestUrl!!.queryParameter("tags"))
     }
-    @Test fun incompleteItemsCannotBeSilentlyDropped() = runTest {
+    @Test fun unavailableOriginalRemainsAnExplicitPostInsteadOfBlockingItsWholePage() = runTest {
         server.enqueue(json("""[{"id":1,"file_url":"https://wimg.rule34.xxx/one.png"},{"id":2}]"""))
+        val posts = client.searchPosts("artist", 0, null)
+        assertEquals(listOf(1L, 2L), posts.map { it.id })
+        assertNull(posts.first().availabilityError)
+        assertNotNull(posts.last().availabilityError)
+        assertEquals("", posts.last().fileUrl)
+    }
+    @Test fun aPostWithoutIdentityCannotBeSilentlyDropped() = runTest {
+        server.enqueue(json("""[{"id":1,"file_url":"https://wimg.rule34.xxx/one.png"},{"file_url":"https://wimg.rule34.xxx/two.png"}]"""))
         assertEquals(FailureKind.BAD_RESPONSE, failure { client.searchPosts("artist", 0, null) }.kind)
+    }
+    @Test fun ignoredPostIdCannotReplaceMetadataWithADifferentOriginal() = runTest {
+        server.enqueue(json("""[{"id":2,"file_url":"https://wimg.rule34.xxx/two.png"}]"""))
+        assertEquals(FailureKind.BAD_RESPONSE, failure { client.getPost(1) }.kind)
     }
     @Test fun challengeAndEmptyBodyCannotBeMistakenForExhaustedSearch() = runTest {
         for (body in listOf("<html><title>Just a moment...</title></html>", "{}")) {

@@ -16,6 +16,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation(project(":download"))
     testImplementation("org.json:json:20250517")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
@@ -24,6 +25,7 @@ dependencies {
     testImplementation("androidx.test:core:1.7.0")
 }
 tasks.withType<Test>().configureEach {
+    systemProperty("rule34.schemaDirectory", file("schemas").absolutePath)
     systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
     val testHome = layout.buildDirectory.dir("test-home").get().asFile
     systemProperty("user.home", testHome.absolutePath)

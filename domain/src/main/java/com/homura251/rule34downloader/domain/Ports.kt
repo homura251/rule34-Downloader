@@ -65,6 +65,9 @@ interface SyncRepository : LibraryRepository {
     suspend fun checkpoint(id: String): ScanCheckpoint?
     suspend fun savePage(id: String, runId: String, posts: List<Rule34Post>, checkpoint: ScanCheckpoint)
     suspend fun commitScan(id: String, runId: String, watermark: Long)
+    /** Reset discovery only after its runner has stopped; retain files and memberships. */
+    suspend fun restartScan(id: String): Boolean
+    suspend fun setSyncMode(id: String, mode: SyncMode)
     suspend fun repairMetadata(id: String, runId: String, post: Rule34Post)
     suspend fun records(id: String): List<DownloadRecord>
     suspend fun queue(id: String): List<DownloadRecord>
@@ -94,6 +97,9 @@ interface MediaDownloader {
 
 interface TaskController {
     suspend fun sync(id: String)
+    suspend fun downloadKnown(id: String)
+    suspend fun rescan(id: String)
+    suspend fun resume(id: String)
     suspend fun pause(id: String)
     suspend fun remove(id: String)
     suspend fun pauseAll()

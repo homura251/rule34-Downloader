@@ -36,7 +36,7 @@ class MediaStoreDownloader(
     private suspend fun downloadBlocking(record: DownloadRecord, source: MediaStream, onHeaders: (Long) -> Unit, onProgress: (Long, Long) -> Unit,
         onPublished: suspend (SavedFile) -> Unit): Result {
         checkActive()
-        val expectedMd5 = FileChecksum.expected(record.md5, record.fileUrl)
+        val expectedMd5 = FileChecksum.expectedForReuse(record.md5, record.verifiedMd5, record.fileUrl)
             ?: throw FileIntegrityException("帖子 #${record.postId} 的原文件缺少可靠 MD5，无法确认完整性。")
         val extension = extensionFromUrl(record.fileUrl)
         var insertedUri: Uri? = null

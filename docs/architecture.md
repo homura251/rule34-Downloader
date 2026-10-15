@@ -30,7 +30,7 @@ flowchart TD
 
 | 表 | 内容 |
 | --- | --- |
-| `collections` | 订阅、旧 Pool、用户暂停意图、已完成扫描水位、当前运行 lease、状态与退避 |
+| `collections` | 订阅、旧 Pool、用户暂停意图、持久化任务模式、已完成扫描水位、当前运行 lease、状态与退避 |
 | `posts` | 按 Post ID 去重的元数据 |
 | `collection_posts` | 订阅与帖子的多对多关联；旧 Pool 保存 position |
 | `download_tasks` | 每个目录下帖子的传输状态、字节进度、失败次数 |
@@ -46,8 +46,11 @@ stateDiagram-v2
     [*] --> QUEUED
     QUEUED --> DISCOVERING
     DISCOVERING --> VERIFYING: 完整扫描提交水位
+    DISCOVERING --> VERIFYING: 扫描异常，保留检查点并处理已有文件
     VERIFYING --> SYNCING
     SYNCING --> COMPLETE
+    SYNCING --> QUEUE_COMPLETE: 仅下载已发现文件
+    SYNCING --> SCAN_INCOMPLETE: 扫描格式异常重试耗尽
     SYNCING --> ERROR: 文件重试耗尽
     DISCOVERING --> WAITING_RETRY: 429 / 5xx
     SYNCING --> WAITING_RETRY
@@ -65,13 +68,15 @@ stateDiagram-v2
     PAUSED --> QUEUED: 用户继续
 ```
 
-状态、任务队列、扫描水位分别持久化。`user_paused` 是用户意图；收到网络错误或重启应用不会清除它。旧 Pool 的 `ARCHIVED` 状态不启动网络任务。非临时 API 响应错误或媒体验证网页使批次进入阻断状态，界面保留明确原因。
+状态、任务队列、扫描水位和任务模式分别持久化。`user_paused` 与 `sync_mode` 是用户意图；网络错误、暂停和重启不会清除它们。已发现文件可在 API 无凭据时独立下载，认证变更只暂停需要 API 的任务。旧 Pool 的 `ARCHIVED` 状态不启动网络任务。
 
 扫描以 `sort:id:desc` 与单个 ID 上界分页。每页严格校验 ID 顺序、边界和字段完整性，元数据、任务和检查点在同一事务保存。失败保留已保存页面，从检查点继续；完整扫描结束才更新最高 ID。元数据已完整发现后，单个媒体下载失败不会回滚扫描水位。
 
-原站 DAPI 的无结果 JSON 搜索返回 HTTP 200、零字节正文。客户端保留相同查询参数和认证，以 XML 再请求一次；只有完整解析的 `<posts count="0">` 才确认空页，XML 返回帖子则正常处理。第二次仍为空、格式错误、认证错误或验证网页均不视为扫描完成。帖子同时兼容 `md5` / `hash`，作者标签兼容数字类型和实际 `tag_info` 数组中的 `tag` / 文本 `type`，避免把通用标签当作作者或为每个标签额外请求。
+原站 DAPI 的无结果 JSON 搜索返回 HTTP 200、零字节正文。客户端保留相同查询参数和认证，以 XML 再请求一次；只有完整解析的 `<posts count="0">` 才确认空页。具有有效 ID 但缺少原文件地址的帖子以独立失败项持久化，允许其他帖子和分页继续；无法定位身份、分页重复或无法确认完整响应时保留扫描检查点。扫描失败不阻断已发现的可信文件。帖子兼容 `md5` / `hash`，作者标签兼容数字和文本类型。按 ID 获取的响应必须匹配请求的 Post ID，避免错误原文件替换既有信息。
 
-每个运行使用独立 `run_id`。Room 在事务中验证 lease，已取消或替换的工作不能覆盖后继任务的状态、检查点或文件 URI。WorkManager 保留旧 unique work 名称和输入 key，以便升级后恢复旧排队工作。
+手动操作明确分为重试扫描、只下载已发现文件和从头扫描。只下载模式完全不调用 CatalogGateway，完成后使用 QUEUE_COMPLETE，避免把本地队列完成误报为作者全量扫描完成。模式同时持久化在 Room 与 WorkManager 输入中，延时重试、暂停继续及进程恢复均保留。完整重扫先取消旧工作并等待目录互斥锁释放，再在事务中重置扫描水位/检查点，文件 URI 和已发现关联全部保留。
+
+每个运行使用独立 `run_id`。beginRun 仅在没有活动 lease 时原子获取，不再覆盖正在运行的任务。Room 在事务中验证 lease，已取消或替换的工作不能覆盖后继任务的状态、检查点或文件 URI。控制指令按订阅串行执行，目录互斥锁继续覆盖旧任务清理。WorkManager 保留旧 unique work 名称和输入 key，以便升级后恢复旧排队工作。
 
 原文件传输完成后，先校验响应 MD5、长度，再读回已写入的文件校验。发布 MediaStore URI 与持久化完成记录在不可取消区间执行。中途取消只清理本次未发布的条目；若已发布文件的数据库写入失败，保留文件供后续复用。
 
@@ -89,6 +94,6 @@ API 与媒体使用不同客户端。API 请求禁止重定向，避免认证查
 
 ## 迁移与验收
 
-数据库文件名不变，版本 1–5 都有到 Room 6 的非破坏性迁移。迁移保留原目录关联、local URI、verified MD5、同步水位、暂停意图和旧 Pool 顺序。旧活动传输回到待处理；旧版本未验证的完成记录重新校验。Room schema 导出到 `data/schemas`，不设置 destructive fallback。
+数据库文件名不变，版本 1–5 保留原有到 6 的迁移，再通过 6→7 添加默认 FULL 模式。直接从 6 升级也保留 local URI、verified MD5、同步水位、暂停意图和旧 Pool 顺序。失效本地文件的可信校验值会在删除 URI 关联前保留到帖子元数据，供缺失文件恢复使用。Room schema 导出到 `data/schemas`，不设置 destructive fallback。
 
 测试分别检查协议、引擎、SQLite 事务和 Android 副作用。关键验收包括分页失败不能跳过帖子、取消不丢失已发布 URI、旧 lease 写入无效、暂停在重启后保留、实际卸载清空数据库与授权但保留公共文件，以及 3000 文件经 SAF 校验复用。
