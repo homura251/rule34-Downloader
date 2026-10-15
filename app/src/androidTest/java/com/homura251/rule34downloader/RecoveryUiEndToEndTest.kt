@@ -111,6 +111,8 @@ class RecoveryUiEndToEndTest {
                 val actual = app.contentResolver.openInputStream(Uri.parse(record.localUri!!))!!.use { it.readBytes() }
                 assertEquals(origin.hashes.getValue(record.postId), TestApiOrigin.md5(actual))
             }
+            ui.waitUntil(15_000) { ui.onAllNodesWithText("已完成").fetchSemanticsNodes().isNotEmpty() }
+            ui.onNodeWithTag("confirm-rescan-$tag").assertDoesNotExist()
             capture("recovery-complete.png")
             writeTestText(app, "controlled", "recovery-result.txt",
                 "PASS: broken API scan still downloaded healthy known files; one forbidden original isolated; UI downloaded remaining file without API credentials or API calls; original URIs preserved; subscription retry scan left paused known-file mode; cancelled rescan changed nothing; confirmed rescan reset discovery and reused all three MediaStore files")
@@ -130,6 +132,7 @@ class RecoveryUiEndToEndTest {
         while (!predicate()) { check(System.nanoTime() < until) { "Recovery state did not converge" }; Thread.sleep(50) }
     }
     private fun capture(name: String) {
+        ui.waitForIdle()
         val image = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()!!
         writeTestEvidence(app, "controlled", name, "image/png") { assertTrue(image.compress(Bitmap.CompressFormat.PNG, 100, it)) }
         image.recycle()
