@@ -52,9 +52,21 @@ class Rule34LiveApiTest {
                         fail("Missing post must report NOT_FOUND")
                     } catch (e: SourceFailure) { assertEquals(FailureKind.NOT_FOUND, e.kind) }
 
-                    val detailed = (first + second).map { catalog.getPost(it.id) }
-                    val artistPost = detailed.firstOrNull { post -> post.tagInfo.orEmpty().any { it.type == 1 } }
-                        ?: error("No artist tag was supplied by the live API for the sampled posts")
+                    // Newly uploaded posts can legitimately have no artist annotation. Search a
+                    // bounded sample instead of requiring one among the four pagination posts.
+                    val sample = Rule34ApiClient(account, http, pageSize = 32)
+                        .searchPosts("-ai_generated", 0, null)
+                    var annotated: Rule34Post? = null
+                    for (candidate in (first + second + sample).distinctBy { it.id }) {
+                        val detailed = catalog.getPost(candidate.id)
+                        if (detailed.tagInfo.orEmpty().any { it.type == 1 }) {
+                            annotated = detailed
+                            break
+                        }
+                    }
+                    val artistPost = requireNotNull(annotated) {
+                        "No artist annotation was supplied in the bounded live sample"
+                    }
                     val artists = catalog.resolveArtistTags(artistPost)
                     assertTrue(artists.isNotEmpty())
                     assertTrue(artists.all { it.name in artistPost.tags && it.type == 1 })
@@ -64,7 +76,9 @@ class Rule34LiveApiTest {
 
                     // Exercise the same streaming checksum and read-back verification used by the app.
                     // The media client carries no API query parameters or Authorization header.
-                    val original = first.first()
+                    val original = (first + second + sample).firstOrNull {
+                        SavedFileIdentity.extension(it.fileUrl) in setOf("jpg", "jpeg", "png", "webp")
+                    } ?: error("Live API did not supply an image original")
                     val file = File.createTempFile("rule34-live-", ".original")
                     try {
                         val request = Request.Builder().url(original.fileUrl)
