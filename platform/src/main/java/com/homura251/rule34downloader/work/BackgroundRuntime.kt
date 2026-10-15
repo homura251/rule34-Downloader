@@ -179,9 +179,16 @@ class BackgroundRuntime(
         if (!account.state.value.canUseApi) { repository.suspendForAuthentication(); return 0 }
         var scheduled = 0
         for (collection in repository.getCollections()) if (collection.tag in ids && collection.poolId == null && !collection.paused) {
-            SyncControls.pause(collection.tag)
-            repository.resetFailures(collection.tag)
-            if (enqueue(collection.tag, ExistingWorkPolicy.REPLACE, true)) scheduled++
+            command(collection.tag).withLock {
+                val current = repository.getCollection(collection.tag) ?: return@withLock
+                if (current.paused || current.poolId != null) return@withLock
+                SyncControls.pause(collection.tag)
+                withContext(Dispatchers.IO) { manager.cancelUniqueWork(workName(collection.tag)).result.get(10, TimeUnit.SECONDS) }
+                SyncControls.gate(MediaStoreDownloader.buildRelativePath(collection.tag)).withLock {
+                    repository.resetFailures(collection.tag)
+                    if (enqueue(collection.tag, ExistingWorkPolicy.REPLACE, true)) scheduled++
+                }
+            }
         }
         return scheduled
     }
@@ -191,10 +198,10 @@ class BackgroundRuntime(
             val tree = Uri.parse(uri)
             context.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             val job = currentCoroutineContext()
-            val scan = withContext(Dispatchers.IO) { LinkedDownloadDirectory(context.contentResolver, tree) { job.ensureActive() }.scan() }
+            val knownFolders = repository.getCollections().mapTo(mutableSetOf()) { MediaStoreDownloader.sanitizeFolderName(it.tag) }
+            val scan = withContext(Dispatchers.IO) { LinkedDownloadDirectory(context.contentResolver, tree,
+                { job.ensureActive() }, knownFolders).scan() }
             val plan = FolderRestorePlan.create(scan.directories, repository.getCollections(), scan.wholeLibrary)
-            if (plan.targets.isEmpty() && plan.paused == 0 && plan.poolDirectories == 0)
-                throw SourceFailure(FailureKind.FILE, "未发现可恢复的作者目录。请选择 Rule34 Downloader 根目录或作者子目录。")
             // Once the association is saved, creating subscriptions and scheduling work must survive navigation.
             val result = withContext(NonCancellable) {
                 settings.save(settings.snapshot().copy(existingDownloadsTreeUri = uri))
@@ -202,7 +209,9 @@ class BackgroundRuntime(
                 for (addition in plan.additions) if (repository.addCollection(addition.tag, addition.sourcePostId)) restored++
                 val scheduled = resyncLinkedFolders(plan.targets)
                 FolderLinkResult(restored, scheduled, plan.paused, plan.targets.isNotEmpty() && !account.state.value.canUseApi,
-                    plan.poolDirectories, plan.unrecognizedDirectories)
+                    plan.poolDirectories, plan.unrecognizedDirectories, scan.name, scan.totalFiles, scan.identifiedFiles,
+                    scan.unreadableDirectories.size, plan.unrecognizedDirectories > 0 ||
+                        (plan.targets.isEmpty() && plan.paused == 0 && scan.totalFiles > 0 && plan.poolDirectories == 0))
             }
             mutableFolderState.value = FolderLinkState(result = result)
             result
@@ -212,7 +221,8 @@ class BackgroundRuntime(
         } catch (e: Exception) {
             val error = when (e) {
                 is SecurityException -> SourceFailure(FailureKind.FILE, "无法读取所选目录，请重新授权旧下载目录。")
-                is IOException -> SourceFailure(FailureKind.FILE, "无法扫描旧下载目录，请检查目录是否可读取。")
+                is IOException -> SourceFailure(FailureKind.FILE, e.message ?: "无法读取所选目录，请检查授权后重新选择。")
+                is IllegalArgumentException -> SourceFailure(FailureKind.FILE, "所选位置不是有效的目录，请通过系统目录选择器重新选择。")
                 else -> e
             }
             mutableFolderState.value = FolderLinkState(error = error.userMessage())

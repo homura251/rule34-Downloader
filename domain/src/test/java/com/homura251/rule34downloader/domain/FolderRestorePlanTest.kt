@@ -41,4 +41,9 @@ class FolderRestorePlanTest {
         val plan = FolderRestorePlan.create(listOf(SavedDownloadDirectory("empty", null, 0), directory("artist"), directory("artist")), emptyList(), true)
         assertEquals(1, plan.additions.size); assertEquals(setOf("artist"), plan.targets)
     }
+    @Test fun hashNamedMediaCanRestoreAnAuthorWithoutAPostIdInItsFilename() {
+        val plan = FolderRestorePlan.create(listOf(SavedDownloadDirectory("artist", null, 3)), emptyList(), true)
+        assertEquals(listOf(RestoredSubscription("artist", 0)), plan.additions)
+        assertEquals(setOf("artist"), plan.targets)
+    }
 }

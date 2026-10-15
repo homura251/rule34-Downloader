@@ -4,26 +4,30 @@ import java.io.InputStream
 import java.net.URI
 import java.security.MessageDigest
 
-data class SavedFileIdentity(val postId: Long, val md5: String?, val extension: String) {
+data class SavedFileIdentity(val postId: Long?, val md5: String?, val extension: String) {
     /**
      * The filename is only an index hint. Content MD5 is the final authority, so
      * renamed files and historical extension changes must still be eligible.
      */
     fun matches(postId: Long, expectedMd5: String): Boolean =
-        this.postId == postId && FileChecksum.normalize(expectedMd5) != null
+        FileChecksum.normalize(expectedMd5)?.let { expected ->
+            if (this.postId != null) this.postId == postId else md5 == expected
+        } == true
 
     companion object {
         private val POST_ID_PREFIX = Regex("^(\\d+)(?:[_ .(-].*)?$")
         private val HASH = Regex("[a-fA-F0-9]{32}")
+        private val HASH_ONLY = Regex("^([a-fA-F0-9]{32})(?:[ _-]?\\([0-9]+\\))?$")
 
         fun parse(name: String): SavedFileIdentity? {
             val value = name.trim()
-            if (value.isEmpty()) return null
+            if (value.isEmpty() || value.any { it == '/' || it == '\\' || it.code == 0 }) return null
             val dot = value.lastIndexOf('.')
             val stem = if (dot > 0) value.substring(0, dot) else value
+            val extension = if (dot in 1 until value.lastIndex) value.substring(dot + 1).lowercase() else ""
+            HASH_ONLY.matchEntire(stem)?.let { return SavedFileIdentity(null, it.groupValues[1].lowercase(), extension) }
             val match = POST_ID_PREFIX.matchEntire(stem) ?: return null
             val id = match.groupValues[1].toLongOrNull()?.takeIf { it > 0 } ?: return null
-            val extension = if (dot in 1 until value.lastIndex) value.substring(dot + 1).lowercase() else ""
             return SavedFileIdentity(id, HASH.find(stem)?.value?.lowercase(), extension)
         }
 
@@ -34,6 +38,13 @@ data class SavedFileIdentity(val postId: Long, val md5: String?, val extension: 
         /** Return byte count only for non-empty files whose known checksum matches. */
         fun verify(input: InputStream, expectedMd5: String, checkActive: () -> Unit = {}): Long? {
             val expected = FileChecksum.normalize(expectedMd5) ?: return null
+            return fingerprint(input, checkActive)?.takeIf { it.md5 == expected }?.bytes
+        }
+
+        data class Fingerprint(val bytes: Long, val md5: String)
+
+        /** Hash renamed originals once; compare with trusted metadata before reusing them. */
+        fun fingerprint(input: InputStream, checkActive: () -> Unit = {}): Fingerprint? {
             val digest = MessageDigest.getInstance("MD5")
             val buffer = ByteArray(64 * 1024)
             var bytes = 0L
@@ -48,7 +59,7 @@ data class SavedFileIdentity(val postId: Long, val md5: String?, val extension: 
             if (bytes == 0L) return null
             checkActive()
             val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
-            return bytes.takeIf { hash == expected }
+            return Fingerprint(bytes, hash)
         }
     }
 }

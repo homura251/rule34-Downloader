@@ -4,9 +4,9 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import com.homura251.rule34downloader.domain.*
 import com.homura251.rule34downloader.domain.files.SavedFileIdentity
 import com.homura251.rule34downloader.domain.files.FileChecksum
-import com.homura251.rule34downloader.domain.DownloadRecord
 import java.io.IOException
 
 class ExistingDownloads(
@@ -17,102 +17,117 @@ class ExistingDownloads(
 ) {
     data class Match(val uri: Uri, val bytes: Long, val verifiedMd5: String)
     data class Lookup(val match: Match?, val rejection: String? = null)
-    private data class File(val uri: Uri, val identity: SavedFileIdentity)
-
+    private data class Candidate(val uri: Uri, val identity: SavedFileIdentity?)
     private val resolver = context.contentResolver
-    private var files: Map<Long, List<File>> = emptyMap()
+    private val byId = mutableMapOf<Long, MutableList<Candidate>>()
+    private val byHash = mutableMapOf<String, MutableList<Candidate>>()
+    private val seen = hashSetOf<String>()
+    private val unidentified = ArrayDeque<Candidate>()
+    private val fingerprints = mutableMapOf<String, MutableList<Candidate>>()
     private var indexedTree: String? = null
+    private var ownedLoaded = false
+    private var linkedLoaded = false
 
-    init { refresh() }
+    private fun add(uri: Uri, name: String) {
+        if (!seen.add(uri.toString())) return
+        val file = Candidate(uri, SavedFileIdentity.parse(name))
+        val id = file.identity?.postId
+        if (id != null) byId.getOrPut(id) { mutableListOf() } += file
+        else {
+            file.identity?.md5?.let { byHash.getOrPut(it) { mutableListOf() } += file }
+            unidentified.addLast(file)
+        }
+    }
 
-    private fun refresh() {
-        val selectedTree = currentFolder()
-        val found = mutableListOf<File>()
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+    private fun loadOwned() {
+        val selected = currentFolder()
+        if (ownedLoaded && indexedTree != selected) {
+            byId.clear(); byHash.clear(); seen.clear(); unidentified.clear(); fingerprints.clear()
+            ownedLoaded = false; linkedLoaded = false
+        }
+        if (ownedLoaded) return
+        indexedTree = selected
         try {
-            resolver.query(
-                collection,
+            resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                 arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME),
                 "relative_path = ? AND is_pending = 0 AND _size > 0",
-                arrayOf(MediaStoreDownloader.buildRelativePath(artistTag)),
-                null,
-            )?.use { cursor ->
+                arrayOf(MediaStoreDownloader.buildRelativePath(artistTag)), null)?.use { cursor ->
                 while (cursor.moveToNext()) {
                     checkActive()
-                    val identity = SavedFileIdentity.parse(cursor.getString(1)) ?: continue
-                    found += File(ContentUris.withAppendedId(collection, cursor.getLong(0)), identity)
+                    add(ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cursor.getLong(0)), cursor.getString(1))
                 }
             }
         } catch (_: SecurityException) {
-            // Reinstalled apps use the authorized document tree below.
+            // A reinstall obtains access through SAF instead.
         }
-
-        selectedTree?.let { value ->
-            try {
-                val tree = Uri.parse(value)
-                val directory = LinkedDownloadDirectory(resolver, tree, checkActive)
-                val folderId = directory.authorFolder(MediaStoreDownloader.sanitizeFolderName(artistTag))
-                if (folderId != null) {
-                    for (entry in directory.children(folderId)) {
-                        checkActive()
-                        if (entry.directory) continue
-                        val identity = SavedFileIdentity.parse(entry.name) ?: continue
-                        found += File(directory.uri(entry), identity)
-                    }
-                }
-            } catch (e: SecurityException) {
-                throw com.homura251.rule34downloader.domain.SourceFailure(com.homura251.rule34downloader.domain.FailureKind.FILE, "旧下载目录授权已失效，请在设置中重新选择目录。")
-            } catch (e: IOException) {
-                throw com.homura251.rule34downloader.domain.SourceFailure(com.homura251.rule34downloader.domain.FailureKind.FILE, "无法读取旧下载目录，请在设置中重新选择目录。")
-            }
-        }
-
-        files = found.groupBy { it.identity.postId }
-        indexedTree = selectedTree
+        ownedLoaded = true
     }
 
-    fun find(record: DownloadRecord, checkActive: () -> Unit): Match? =
-        lookup(record, checkActive).match
-
-    fun lookup(record: DownloadRecord, checkActive: () -> Unit): Lookup {
-        if (indexedTree != currentFolder()) refresh()
-        val expected = FileChecksum.expectedForReuse(record.md5, record.verifiedMd5, record.fileUrl)
-            ?: return Lookup(null, "帖子 #${record.postId} 缺少可靠 MD5，无法校验旧文件")
-
-        var candidateFound = false
-        fun verify(uri: Uri): Match? {
-            candidateFound = true
-            val bytes = try {
-                checkActive()
-                resolver.openInputStream(uri)?.use {
-                    SavedFileIdentity.verify(it, expected, checkActive)
+    private fun loadLinked() {
+        if (linkedLoaded) return
+        indexedTree?.let { value ->
+            try {
+                val directory = LinkedDownloadDirectory(resolver, Uri.parse(value), checkActive)
+                for (entry in directory.filesForAuthor(MediaStoreDownloader.sanitizeFolderName(artistTag))) {
+                    checkActive()
+                    add(directory.uri(entry), entry.name)
                 }
             } catch (_: SecurityException) {
-                null
-            } catch (_: IOException) {
-                null
+                throw SourceFailure(FailureKind.FILE, "旧下载目录授权已失效，请在设置中重新选择目录。")
+            } catch (e: IOException) {
+                throw SourceFailure(FailureKind.FILE, if (e.message.orEmpty().contains("加载"))
+                    "旧下载目录仍在加载，请待文件显示完整后重新关联。" else "无法读取旧下载目录，请在设置中重新选择目录。")
+            } catch (_: IllegalArgumentException) {
+                throw SourceFailure(FailureKind.FILE, "旧下载目录位置无效，请在设置中重新选择目录。")
             }
+        }
+        linkedLoaded = true
+    }
+
+    fun find(record: DownloadRecord, checkActive: () -> Unit): Match? = lookup(record, checkActive).match
+
+    fun lookup(record: DownloadRecord, checkActive: () -> Unit): Lookup {
+        val expected = FileChecksum.expectedForReuse(record.md5, record.verifiedMd5, record.fileUrl)
+            ?: return Lookup(null, "帖子 #" + record.postId + " 缺少可靠 MD5，无法校验旧文件")
+        var candidateFound = false
+        fun fingerprint(uri: Uri): SavedFileIdentity.Companion.Fingerprint? {
             checkActive()
-            return bytes?.let { Match(uri, it, expected) }
-        }
-
-        record.localUri?.let { value ->
-            verify(Uri.parse(value))?.let { return Lookup(it) }
-        }
-
-        for (file in files[record.postId].orEmpty()) {
+            val result = try { resolver.openInputStream(uri)?.use { SavedFileIdentity.fingerprint(it, checkActive) } }
+                catch (_: SecurityException) { null }
+                catch (_: IOException) { null }
             checkActive()
-            if (!file.identity.matches(record.postId, expected)) continue
-            verify(file.uri)?.let { return Lookup(it) }
+            return result
         }
-
-        return Lookup(
-            null,
-            if (candidateFound) {
-                "找到帖子 #${record.postId} 的旧文件，但内容 MD5 校验未通过或文件已无法读取"
-            } else {
-                "未在已授权目录中找到帖子 #${record.postId} 的可复用旧文件"
-            },
-        )
+        fun verify(uri: Uri): Match? {
+            candidateFound = true
+            return fingerprint(uri)?.takeIf { it.md5 == expected }?.let { Match(uri, it.bytes, expected) }
+        }
+        // A valid recorded URI must remain usable even when an unrelated old tree grant has expired.
+        record.localUri?.let { verify(Uri.parse(it))?.let { match -> return Lookup(match) } }
+        loadOwned()
+        fun indexed(): Match? {
+            for (file in byId[record.postId].orEmpty() + byHash[expected].orEmpty()) {
+                checkActive()
+                verify(file.uri)?.let { return it }
+            }
+            return null
+        }
+        indexed()?.let { return Lookup(it) }
+        loadLinked()
+        indexed()?.let { return Lookup(it) }
+        for (candidate in fingerprints[expected].orEmpty()) {
+            verify(candidate.uri)?.let { return Lookup(it) }
+        }
+        // Renamed files have no reliable filename index. Read each at most once per run to
+        // build a content index, then require the same trusted checksum as all other reuse.
+        while (unidentified.isNotEmpty()) {
+            val candidate = unidentified.removeFirst()
+            val value = fingerprint(candidate.uri) ?: continue
+            fingerprints.getOrPut(value.md5) { mutableListOf() } += candidate
+            if (value.md5 == expected) return Lookup(Match(candidate.uri, value.bytes, expected))
+        }
+        return Lookup(null, if (candidateFound)
+            "帖子 #" + record.postId + " 的候选旧文件校验未通过或已无法读取"
+        else "未在已授权目录中找到与帖子 #" + record.postId + " 匹配的旧文件")
     }
 }
