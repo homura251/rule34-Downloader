@@ -96,7 +96,7 @@ class RecoveryUiEndToEndTest {
             ui.onNodeWithTag("rescan-$tag").performClick()
             ui.onNodeWithText("取消").performClick()
             assertNotNull(read { graph.library.checkpoint(tag) })
-            assertEquals(SyncState.QUEUE_COMPLETE, read { graph.library.getCollection(tag) }!!.syncState)
+            assertEquals(SyncState.WAITING_RETRY, read { graph.library.getCollection(tag) }!!.syncState)
             ui.onNodeWithTag("recovery-$tag").performScrollTo().performClick()
             ui.onNodeWithTag("rescan-$tag").performClick()
             val beforeRescan = origin.totalOriginals()
@@ -113,7 +113,7 @@ class RecoveryUiEndToEndTest {
             }
             capture("recovery-complete.png")
             writeTestText(app, "controlled", "recovery-result.txt",
-                "PASS: broken API scan still downloaded healthy known files; one forbidden original isolated; UI downloaded remaining file without API credentials or API calls; original URIs preserved; cancelled rescan changed nothing; confirmed rescan reset discovery and reused all three MediaStore files")
+                "PASS: broken API scan still downloaded healthy known files; one forbidden original isolated; UI downloaded remaining file without API credentials or API calls; original URIs preserved; subscription retry scan left paused known-file mode; cancelled rescan changed nothing; confirmed rescan reset discovery and reused all three MediaStore files")
         } finally {
             origin.brokenLists.remove(tag); origin.forbiddenOriginals.clear()
             read {
