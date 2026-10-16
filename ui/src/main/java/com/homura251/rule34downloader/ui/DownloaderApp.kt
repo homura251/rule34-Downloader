@@ -129,7 +129,7 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
                                     DocumentsContract.buildDocumentUri(checkNotNull(tree.authority), DocumentsContract.getTreeDocumentId(tree))
                                 }.getOrNull() }
                                 picker.launch(initial ?: DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Download/Rule34 Downloader"))
-                            }, onRequestNotificationPermission)
+                            }, onRequestNotificationPermission, onAddAuthor = ::addSubscription)
                         }
                     }
                 }

@@ -32,6 +32,15 @@ class SavedFileIdentityTest {
         assertEquals(5L, SavedFileIdentity.verify(ByteArrayInputStream("hello".toByteArray()), hash))
     }
 
+    @Test fun hashOnlyNamesAndTheirDuplicateCopiesCanBeMatchedByChecksum() {
+        for (name in listOf("$hash.png", "${hash.uppercase()} (1).PNG")) {
+            val identity = SavedFileIdentity.parse(name)
+            assertNotNull(identity)
+            assertTrue(identity!!.matches(42, hash))
+            assertFalse(identity.matches(42, "00000000000000000000000000000000"))
+        }
+    }
+
     @Test fun rejectsEmptyTruncatedAndCorruptedFiles() {
         for (text in listOf("", "hell", "wrong")) {
             assertNull(SavedFileIdentity.verify(ByteArrayInputStream(text.toByteArray()), hash))

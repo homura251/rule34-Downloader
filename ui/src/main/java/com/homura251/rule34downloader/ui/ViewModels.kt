@@ -166,12 +166,17 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
 
 internal fun FolderLinkResult.description(): String = buildString {
     append("旧下载目录已关联")
+    selectedDirectory?.let { append("：$it（找到 $filesFound 个文件，识别 $identifiedFiles 个作品文件）") }
     if (restored > 0) append("，恢复 $restored 个作者订阅")
     if (scheduled > 0) append("，已自动同步 $scheduled 个订阅")
     if (waitingForApi) append("；验证 API 后会自动同步")
     if (paused > 0) append("；$paused 个暂停订阅保持暂停")
     if (poolDirectories > 0) append("；$poolDirectories 个 Pool 目录暂未恢复")
     if (unrecognizedDirectories > 0) append("；$unrecognizedDirectories 个目录无法识别作者")
+    if (unreadableDirectories > 0) append("；$unreadableDirectories 个子目录无法读取，请单独选择这些目录重新授权")
+    if (manualRecovery) append("；请手动添加作者标签后同步，将按作品信息和文件内容校验复用")
+    else if (selectedDirectory != null && filesFound == 0 && restored == 0 && scheduled == 0 && paused == 0)
+        append("；目录可读取，但未找到文件，请检查所选位置或重新关联")
     append("。")
 }
 

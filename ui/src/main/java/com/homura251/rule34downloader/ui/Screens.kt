@@ -252,7 +252,7 @@ private fun formatBytes(bytes: Long): String = when {
 }
 
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, onLinkFolder: () -> Unit, onRequestNotifications: () -> Unit, setup: Boolean = false, onBrowseOffline: () -> Unit = {}) {
+fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, onLinkFolder: () -> Unit, onRequestNotifications: () -> Unit, setup: Boolean = false, onBrowseOffline: () -> Unit = {}, onAddAuthor: () -> Unit = {}) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val account by viewModel.account.collectAsStateWithLifecycle()
     var clear by remember { mutableStateOf(false) }
@@ -289,11 +289,15 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
             } }
             item { SettingsSection("存储与恢复") {
                 Text("原文件保存到 Download/Rule34 Downloader/<作者>/。", style = MaterialTheme.typography.bodyMedium)
-                Text("关联后自动识别作者目录、恢复订阅并同步，校验后复用已有文件。已暂停的订阅保持暂停。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("可选择作者目录或其上层目录，支持多层子目录和旧文件名。自动识别作者后恢复订阅并同步；无法识别时可手动添加作者，校验后复用文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedButton(onLinkFolder, enabled = !folder.linking, modifier = Modifier.testTag("link-downloads")) {
                     Text(if (folder.linking) "正在扫描并安排同步…" else if (state.settings.existingDownloadsTreeUri == null) "关联并自动同步" else "重新关联并同步")
                 }
                 folder.result?.let { Text(it.copy(waitingForApi = it.waitingForApi && !account.canUseApi).description(), style = MaterialTheme.typography.bodySmall) }
+                if (folder.result?.manualRecovery == true) {
+                    TextButton(onAddAuthor, enabled = account.canUseApi, modifier = Modifier.testTag("folder-add-author")) { Text("手动添加作者") }
+                    if (!account.canUseApi) Text("先验证 API，再添加作者；已关联的目录会保留。", style = MaterialTheme.typography.bodySmall)
+                }
                 folder.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             } }
             item { SettingsSection("关于") {
