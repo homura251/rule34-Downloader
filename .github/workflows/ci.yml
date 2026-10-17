@@ -137,9 +137,53 @@ jobs:
           name: live-api-report
           path: data/build/reports/tests/testDebugUnitTest/
 
+  maestro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [29, 36]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v6
+      - run: sdkmanager 'build-tools;36.0.0'
+      - name: Install verified Maestro CLI
+        run: bash .github/scripts/install-maestro.sh
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Main business flows through Maestro
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash .github/scripts/maestro-e2e.sh
+      - name: Upload Maestro screenshots, reports and verified-file evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-android-${{ matrix.api-level }}
+          path: app/build/maestro-evidence/
+
   bulk-restore:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.bulk_restore)
-    needs: verify
+    needs: [verify, device, maestro]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

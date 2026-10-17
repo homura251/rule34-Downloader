@@ -24,6 +24,7 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
     val delayedPages = AtomicInteger()
     val brokenLists: MutableSet<String> = ConcurrentHashMap.newKeySet()
     val forbiddenOriginals: MutableSet<Long> = ConcurrentHashMap.newKeySet()
+    val visibleCounts = ConcurrentHashMap<String, Int>()
     private val delayDeadline = AtomicLong(0)
     val server = MockWebServer()
     val bytes = (1L..count.toLong()).associateWith { id ->
@@ -64,7 +65,7 @@ internal open class TestApiOrigin(val tag: String, val count: Int, largeFirst: B
                 lists.incrementAndGet()
                 val artist = tags.substringBefore(' ')
                 if (artist in brokenLists) return json("{}")
-                val artistCount = if (count > 200 && artist != tag &&
+                val artistCount = visibleCounts[artist] ?: if (count > 200 && artist != tag &&
                     (artist == tag.replace("test_bulk_", "test_bulk_api_") || artist == tag.replace("test_bulk_", "test_bulk_crash_"))) 84 else count
                 val lower = Regex("id:>([0-9]+)").find(tags)?.groupValues?.get(1)?.toLong() ?: 0
                 val upper = Regex("id:<([0-9]+)").find(tags)?.groupValues?.get(1)?.toLong() ?: Long.MAX_VALUE

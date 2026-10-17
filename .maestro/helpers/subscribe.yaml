@@ -1,0 +1,17 @@
+appId: com.homura251.rule34downloader.e2e
+---
+- tapOn:
+    id: add-author
+- tapOn:
+    id: author-input
+- inputText: ${ARTIST}
+- hideKeyboard
+- tapOn: "继续"
+- tapOn: "订阅并同步"
+- runFlow:
+    when:
+      visible:
+        id: ".*permission_deny_button"
+    commands:
+      - tapOn:
+          id: ".*permission_deny_button"

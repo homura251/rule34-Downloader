@@ -16,3 +16,5 @@ build/
 *.pfx
 *.b64
 keystore.properties
+__pycache__/
+*.pyc
