@@ -1,0 +1,20 @@
+appId: com.homura251.rule34downloader.e2e
+name: 08-network-queued
+---
+- runFlow:
+    file: subscribe.yaml
+    env:
+      ARTIST: maestro_network
+- tapOn:
+    id: nav-tasks
+- assertVisible: "排队中"
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.lists == 0 && output.originals == 0}
+- stopApp
+- launchApp
+- tapOn:
+    id: nav-tasks
+- assertVisible: "排队中"
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.lists == 0 && output.originals == 0}
+- takeScreenshot: queued-without-network

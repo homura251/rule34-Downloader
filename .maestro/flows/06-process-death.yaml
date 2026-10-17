@@ -1,0 +1,31 @@
+appId: com.homura251.rule34downloader.e2e
+name: 06-process-death
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: reset=1&slow=1
+- launchApp:
+    clearState: true
+- runFlow: ../helpers/login.yaml
+- runFlow:
+    file: ../helpers/subscribe.yaml
+    env:
+      ARTIST: maestro_process
+- tapOn:
+    id: nav-tasks
+- extendedWaitUntil:
+    visible: "下载中"
+    timeout: 30000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 1}
+- stopApp
+- launchApp
+- tapOn:
+    id: nav-tasks
+- extendedWaitUntil:
+    visible: "3 已下载 · 0 待下载 · 0 失败"
+    timeout: 90000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 4}
+- takeScreenshot: active-process-recovered

@@ -20,6 +20,8 @@ collect() {
   adb exec-out screencap -p > "$evidence/final-screen.png" || true
   adb shell dumpsys jobscheduler > "$evidence/jobscheduler.txt" || true
   adb shell dumpsys connectivity > "$evidence/connectivity.txt" || true
+  adb shell svc wifi enable || true
+  adb shell svc data enable || true
   kill "$origin_pid" 2>/dev/null || true
 }
 trap collect EXIT
@@ -28,10 +30,25 @@ for ((attempt=0; attempt<50; attempt++)); do
   sleep 0.2
 done
 adb reverse tcp:18734 tcp:18734
-adb shell mkdir -p '/sdcard/Download/Rule34 Downloader/'
+adb shell "mkdir -p '/sdcard/Download/Rule34 Downloader/'"
 adb push "$evidence/seed/maestro_restore" '/sdcard/Download/Rule34 Downloader/'
 adb install -r app/build/outputs/apk/e2e/app-e2e.apk
 maestro --version > "$evidence/maestro-version.txt"
 maestro test --format junit --output "$evidence/results.xml" \
   --test-output-dir "$evidence" --debug-output "$evidence/debug" .maestro
+
+run_network_phase() {
+  local phase="$1"
+  maestro test --format junit --output "$evidence/$phase.xml" \
+    --test-output-dir "$evidence/$phase" --debug-output "$evidence/debug-$phase" \
+    ".maestro/helpers/$phase.yaml"
+}
+run_network_phase network-prepare
+adb shell svc wifi disable
+adb shell svc data disable
+adb shell dumpsys connectivity > "$evidence/offline-connectivity.txt"
+run_network_phase network-queued
+adb shell svc wifi enable
+adb shell svc data enable
+run_network_phase network-resumed
 python3 .github/scripts/verify-maestro-files.py "$evidence"

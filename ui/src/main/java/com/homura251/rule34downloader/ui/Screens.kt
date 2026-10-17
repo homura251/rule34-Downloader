@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -106,7 +108,7 @@ fun SubscriptionsScreen(viewModel: SubscriptionsViewModel, account: AccountState
         }
     }
     removing?.let { collection ->
-        AlertDialog(onDismissRequest = { removing = null }, title = { Text("移除订阅？") },
+        AlertDialog(onDismissRequest = { removing = null }, modifier = Modifier.semantics { testTagsAsResourceId = true }, title = { Text("移除订阅？") },
             text = { Text("${collection.title} 会从资料库移除，已下载文件保留在原目录。") },
             confirmButton = { TextButton({ viewModel.remove(collection.tag); removing = null }, Modifier.testTag("confirm-remove")) { Text("移除") } },
             dismissButton = { TextButton({ removing = null }) { Text("取消") } })
@@ -282,7 +284,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
                 }
                 if (state.settings.autoSyncEnabled) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(15L to "15 分钟", 60L to "1 小时", 360L to "6 小时", 1440L to "24 小时").forEach { (minutes, label) ->
-                        FilterChip(state.settings.syncIntervalMinutes == minutes, { viewModel.settings(state.settings.copy(syncIntervalMinutes = minutes)) }, label = { Text(label) })
+                        FilterChip(state.settings.syncIntervalMinutes == minutes, { viewModel.settings(state.settings.copy(syncIntervalMinutes = minutes)) }, label = { Text(label) }, modifier = Modifier.testTag("sync-interval-$minutes"))
                     }
                 }
                 Button(viewModel::saveSettings, enabled = state.loaded && !state.saving && !folder.linking, modifier = Modifier.testTag("save-settings")) { Text(if (state.saving) "保存中…" else "保存下载设置") }
@@ -311,7 +313,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
             } }
         }
     }
-    if (clear) AlertDialog(onDismissRequest = { clear = false }, title = { Text("清除 API 凭据？") }, text = { Text("联网任务将挂起，已下载文件与队列会保留。") },
+    if (clear) AlertDialog(onDismissRequest = { clear = false }, modifier = Modifier.semantics { testTagsAsResourceId = true }, title = { Text("清除 API 凭据？") }, text = { Text("联网任务将挂起，已下载文件与队列会保留。") },
         confirmButton = { TextButton({ clear = false; viewModel.clearAccount() }, Modifier.testTag("confirm-clear-account")) { Text("清除") } }, dismissButton = { TextButton({ clear = false }) { Text("取消") } })
 }
 
@@ -355,7 +357,7 @@ private fun SettingSwitch(title: String, caption: String, value: Boolean, modifi
 fun AddSubscriptionDialog(viewModel: AddSubscriptionViewModel, onDismiss: () -> Unit, onRequestNotifications: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(state.added) { if (state.added) onDismiss() }
-    AlertDialog(onDismissRequest = { if (!state.saving) onDismiss() }, title = { Text("添加作者订阅") },
+    AlertDialog(onDismissRequest = { if (!state.saving) onDismiss() }, modifier = Modifier.semantics { testTagsAsResourceId = true }, title = { Text("添加作者订阅") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("输入作者标签，或粘贴帖子链接 / ID。")

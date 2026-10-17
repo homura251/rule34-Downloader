@@ -17,6 +17,8 @@ name: 03-pause-recovery
 - extendedWaitUntil:
     visible: "下载中"
     timeout: 30000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 1}
 - tapOn: "全部暂停"
 - extendedWaitUntil:
     visible:
@@ -77,5 +79,7 @@ name: 03-pause-recovery
 - assertVisible:
     id: auto-sync
     checked: true
-- assertVisible: "15 分钟"
+- assertVisible:
+    id: sync-interval-15
+    selected: true
 - takeScreenshot: settings-persisted
