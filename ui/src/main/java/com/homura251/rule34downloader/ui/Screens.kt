@@ -207,7 +207,7 @@ fun TasksScreen(viewModel: TasksViewModel, canUseApi: Boolean, snackbar: Snackba
         }
         item {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("全部", "进行中", "已暂停", "需处理").forEach { value -> FilterChip(filter == value, { filter = value }, label = { Text(value) }) }
+                listOf("全部", "进行中", "已暂停", "需处理").forEach { value -> FilterChip(filter == value, { filter = value }, label = { Text(value) }, modifier = Modifier.testTag("task-filter-$value")) }
             }
         }
         if (shown.isEmpty()) item { EmptyState("没有${if (filter == "全部") "任务" else filter + "任务"}", "订阅同步与下载进度会集中显示在这里。") }

@@ -7,6 +7,8 @@ name: 03-pause-recovery
       CONTROL: reset=1&slow=1
 - launchApp:
     clearState: true
+    permissions:
+      all: deny
 - runFlow: ../helpers/login.yaml
 - runFlow:
     file: ../helpers/subscribe.yaml
@@ -30,10 +32,12 @@ name: 03-pause-recovery
 - assertVisible: "已暂停"
 - tapOn:
     id: nav-tasks
-- tapOn: "已暂停"
+- tapOn:
+    id: task-filter-已暂停
 - assertVisible: "maestro_pause"
 - tapOn: "继续暂停任务"
-- tapOn: "全部"
+- tapOn:
+    id: task-filter-全部
 - extendedWaitUntil:
     visible: "3 已下载 · 0 待下载 · 0 失败"
     timeout: 60000

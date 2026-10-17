@@ -87,6 +87,9 @@ name: 05-api-media-errors
     id: nav-settings
 - tapOn:
     id: verify-api
+- scrollUntilVisible:
+    element: "已连接 · User ID 42"
+    direction: UP
 - extendedWaitUntil:
     visible: "已连接 · User ID 42"
     timeout: 30000

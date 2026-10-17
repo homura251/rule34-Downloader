@@ -96,7 +96,7 @@ fun GalleryScreen(viewModel: GalleryViewModel, allowRemote: Boolean, onSettings:
     var previewPosts by remember { mutableStateOf<List<GalleryPost>>(emptyList()) }
     var previewIndex by remember { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().testTag("gallery-filters").horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GalleryFilter.entries.forEach { value ->
                 FilterChip(selected = filter == value, onClick = { viewModel.filter(value) }, label = { Text(value.label) }, modifier = Modifier.testTag("gallery-filter-${value.name}"))
             }

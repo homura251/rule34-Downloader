@@ -49,6 +49,9 @@ name: 01-setup-offline
 - hideKeyboard
 - tapOn:
     id: verify-api
+- scrollUntilVisible:
+    element: "已连接 · User ID 42"
+    direction: UP
 - assertVisible: "已连接 · User ID 42"
 - stopApp
 - launchApp

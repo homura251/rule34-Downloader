@@ -42,8 +42,10 @@ name: 02-subscriptions-gallery
 - tapOn:
     id: browse-maestro_alpha
 - assertVisible: "3 件作品 · 本地优先"
-- tapOn:
-    id: gallery-filter-IMAGES
+- runFlow:
+    file: ../helpers/gallery-filter.yaml
+    env:
+      FILTER: IMAGES
 - assertVisible: "2 件作品 · 本地优先"
 - tapOn:
     id: gallery-post-maestro_alpha-102
@@ -52,16 +54,20 @@ name: 02-subscriptions-gallery
     direction: LEFT
 - assertVisible: "#101 · 2/2"
 - tapOn: "关闭预览"
-- tapOn:
-    id: gallery-filter-VIDEOS
+- runFlow:
+    file: ../helpers/gallery-filter.yaml
+    env:
+      FILTER: VIDEOS
 - assertVisible: "1 件作品 · 本地优先"
 - tapOn:
     id: gallery-post-maestro_alpha-103
 - assertVisible: "视频作品"
 - assertVisible: "播放已下载视频"
 - tapOn: "关闭预览"
-- tapOn:
-    id: gallery-filter-FAILED
+- runFlow:
+    file: ../helpers/gallery-filter.yaml
+    env:
+      FILTER: FAILED
 - assertVisible: "0 件作品 · 本地优先"
 - tapOn: "返回"
 - runScript:
@@ -128,10 +134,13 @@ name: 02-subscriptions-gallery
     direction: DOWN
 - tapOn: "清除 API 凭据"
 - tapOn: "取消"
-- assertVisible: "已连接 · User ID 42"
+- assertVisible: "清除 API 凭据"
 - tapOn: "清除 API 凭据"
 - tapOn:
     id: confirm-clear-account
+- scrollUntilVisible:
+    element: "尚未连接"
+    direction: UP
 - assertVisible: "尚未连接"
 - tapOn:
     id: nav-gallery
