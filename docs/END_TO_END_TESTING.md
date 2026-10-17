@@ -10,7 +10,7 @@
 | 图片、GIF、视频原文件、列表筛选、预览翻页、离线浏览 | Maestro `02`；结束后通过 adb 读回文件并核对 MD5 |
 | 新作品增量、重复同步、从头扫描、移除重加复用 | Maestro `02`；`BusinessFlowsEndToEndTest` 检查原 URI、请求次数及水位 |
 | 暂停全部、暂停任务筛选、重启保留暂停、继续任务 | Maestro `03-pause-recovery`；`ApiAppEndToEndTest` |
-| 网络限制和自动同步设置保存 | Maestro `03`；`BusinessFlowsEndToEndTest` 检查已有重试任务更新约束且保留期限 |
+| 网络限制和自动同步设置保存 | Maestro `03`；`BusinessFlowsEndToEndTest` 检查已有重试任务更新约束且保留期限、运行中的传输安全切换网络限制 |
 | 原生目录选择、取消选择、无 API 先恢复订阅、验证后自动复用 | Maestro `04-native-folder`；`FolderLinkRecoveryTest` |
 | 祖先目录、作者目录、images/videos/年份子目录、hash 文件名、改名文件、空目录 | `FolderLayoutEndToEndTest` 的 8 种实际 SAF 布局 |
 | 旧目录失效、取消关联、保留订阅并恢复下载 | `BusinessFlowsEndToEndTest` 和 Maestro `04` |

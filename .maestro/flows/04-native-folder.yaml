@@ -20,7 +20,14 @@ name: 04-native-folder
 - tapOn:
     id: link-downloads
 - assertVisible: "(?i)use this folder"
-- back
+- repeat:
+    times: 5
+    commands:
+      - runFlow:
+          when:
+            visible: "(?i)use this folder"
+          commands:
+            - back
 - assertVisible: "关联并自动同步"
 - tapOn:
     id: link-downloads
@@ -45,10 +52,10 @@ name: 04-native-folder
       id: artist-maestro_restore
     direction: DOWN
 - extendedWaitUntil:
-    visible:
-      id: artist-count-maestro_restore
-      text: "3 已下载 · 0 待下载"
+    visible: "3 已下载 · 0 待下载"
     timeout: 60000
+- assertVisible:
+    id: artist-count-maestro_restore
 - runScript: ../scripts/stats.js
 - assertTrue: ${output.originals == 0}
 - tapOn:

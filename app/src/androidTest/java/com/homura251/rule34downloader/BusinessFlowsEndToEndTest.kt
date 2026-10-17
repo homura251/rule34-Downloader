@@ -23,7 +23,7 @@ class BusinessFlowsEndToEndTest {
     private val graph get() = app.graph
     private val origin get() = ApiTestEnvironment.origin
     private val manager get() = WorkManager.getInstance(app)
-    private val tags = listOf("test_business_network", "test_business_paused", "test_business_unlink", "test_business_incremental")
+    private val tags = listOf("test_business_network", "test_business_paused", "test_business_unlink", "test_business_incremental", "test_business_running_network")
     private fun <T> read(block: suspend () -> T): T = runBlocking(Dispatchers.IO) { block() }
 
     @Before fun prepare() {
@@ -96,6 +96,33 @@ class BusinessFlowsEndToEndTest {
         assertNull(read { graph.settings.snapshot() }.existingDownloadsTreeUri)
         verify(tag, 3)
         writeTestText(app, "controlled", "unlink-folder-result.txt", "PASS: missing/revoked old directory did not require reinstall; user disconnected it in Settings and all 3 originals downloaded and verified")
+    }
+
+    @Test fun stricterNetworkPolicyRestartsActiveTransferWithoutDuplicateOrPartialFiles() {
+        val tag = tags[4]
+        val transfers = origin.totalOriginals()
+        origin.mediaPauseId.set(1)
+        read { graph.library.addCollection(tag, 0); graph.background.sync(tag) }
+        wait { read { graph.library.records(tag) }.any { it.bytesDownloaded > 0 } && pending(tag).any { it.state == WorkInfo.State.RUNNING } }
+        read {
+            graph.settings.save(AppSettings(wifiOnly = true))
+            graph.background.updateSchedule()
+        }
+        complete(tag)
+        verify(tag, 3)
+        assertEquals(transfers + 4, origin.totalOriginals())
+        assertEquals(3, read { graph.library.records(tag) }.map { it.localUri }.distinct().size)
+        app.contentResolver.query(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(android.provider.MediaStore.Downloads._ID, android.provider.MediaStore.Downloads.IS_PENDING),
+            android.os.Bundle().apply {
+                putString(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION, "relative_path = ? AND owner_package_name = ?")
+                putStringArray(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, arrayOf("Download/Rule34 Downloader/$tag/", app.packageName))
+                putInt(android.provider.MediaStore.QUERY_ARG_MATCH_PENDING, android.provider.MediaStore.MATCH_INCLUDE)
+            }, null)!!.use { cursor ->
+            assertEquals(3, cursor.count)
+            while (cursor.moveToNext()) assertEquals(0, cursor.getInt(1))
+        }
+        writeTestText(app, "controlled", "active-network-policy-result.txt", "PASS: restricting a real active HTTP transfer changed its WorkManager generation safely; exactly one interrupted original restarted; all 3 published files match MD5; no duplicate or pending MediaStore rows")
     }
 
     @Test fun genuinelyNewPostIsIncrementalAndRemoveReaddReusesFiles() {

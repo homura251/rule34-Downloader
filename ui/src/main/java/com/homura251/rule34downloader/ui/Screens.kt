@@ -141,7 +141,7 @@ private fun CollectionCard(collection: CollectionSummary, canUseApi: Boolean, on
                 }
                 Box {
                     IconButton({ menu = true }, Modifier.testTag("artist-menu-${collection.tag}")) { Icon(Icons.Rounded.MoreVert, "更多操作") }
-                    DropdownMenu(menu, { menu = false }) {
+                    DropdownMenu(menu, { menu = false }, modifier = Modifier.semantics { testTagsAsResourceId = true }) {
                         if (collection.poolId == null && collection.syncState.pausable && !collection.syncState.stoppable)
                             DropdownMenuItem(text = { Text("暂停订阅") }, onClick = { menu = false; onPause() })
                         DropdownMenuItem(text = { Text("移除订阅") }, onClick = { menu = false; onRemove() }, modifier = Modifier.testTag("remove-${collection.tag}"))

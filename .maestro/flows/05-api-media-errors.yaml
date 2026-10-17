@@ -38,6 +38,10 @@ name: 05-api-media-errors
 - evalScript: ${output.beforeKnownLists = output.lists}
 - tapOn:
     id: nav-tasks
+- scrollUntilVisible:
+    element:
+      id: download-known-maestro_retry
+    direction: DOWN
 - tapOn:
     id: download-known-maestro_retry
 - extendedWaitUntil:

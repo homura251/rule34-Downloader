@@ -88,8 +88,22 @@ class FolderLinkRecoveryTest {
             waitFinished("restore_complete", "restore_missing", "restore_waiting")
             assertEquals(SyncState.PAUSED, read { graph.library.getCollection("restore_paused") }!!.syncState)
             assertEquals(requests, origin.totalOriginals())
+            val retained = listOf("restore_complete", "restore_missing", "restore_waiting").associateWith { tag ->
+                read { graph.library.records(tag) }.map { it.localUri }
+            }
+            read { graph.folders.unlink() }
+            waitFinished("restore_complete", "restore_missing", "restore_waiting")
+            assertNull(read { graph.settings.snapshot() }.existingDownloadsTreeUri)
+            for ((tag, uris) in retained) {
+                assertEquals(uris, read { graph.library.records(tag) }.map { it.localUri })
+                for (record in read { graph.library.records(tag) }) {
+                    assertEquals(origin.hashes.getValue(record.postId), TestApiOrigin.md5(app.contentResolver.openInputStream(Uri.parse(record.localUri!!))!!.use { it.readBytes() }))
+                }
+            }
+            assertEquals(SyncState.PAUSED, read { graph.library.getCollection("restore_paused") }!!.syncState)
+            assertEquals(requests, origin.totalOriginals())
             assertEquals(0, origin.authenticationLeaks.get())
-            writeTestText(app, "controlled", "folder-link-result.txt", "PASS: real SAF picker; completed subscriptions automatically resynced; missing subscriptions recreated from author folders; saved URIs preserved; paused subscription unchanged; no API calls while credentials missing; validation automatically resumed recovery; no extra original HTTP requests")
+            writeTestText(app, "controlled", "folder-link-result.txt", "PASS: real SAF picker; completed subscriptions automatically resynced; missing subscriptions recreated from author folders; saved URIs preserved; paused subscription unchanged; no API calls while credentials missing; validation automatically resumed recovery; disconnecting a valid tree preserved every restored URI and read permission; read-back MD5 passed; no extra original HTTP requests")
         } finally {
             runCatching {
                 val image = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()!!

@@ -23,10 +23,10 @@ name: 03-pause-recovery
 - assertTrue: ${output.originals == 1}
 - tapOn: "全部暂停"
 - extendedWaitUntil:
-    visible:
-      id: task-sync-maestro_pause
-      text: "继续"
+    visible: "继续"
     timeout: 30000
+- assertVisible:
+    id: task-sync-maestro_pause
 - stopApp
 - launchApp
 - assertVisible: "已暂停"

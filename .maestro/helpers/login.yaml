@@ -1,5 +1,9 @@
 appId: com.homura251.rule34downloader.e2e
 ---
+- extendedWaitUntil:
+    visible:
+      id: api-user-id
+    timeout: 90000
 - scrollUntilVisible:
     element:
       id: api-user-id
