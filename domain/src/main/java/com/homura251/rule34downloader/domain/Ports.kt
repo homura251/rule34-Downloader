@@ -118,6 +118,7 @@ data class FolderLinkState(val linking: Boolean = false, val result: FolderLinkR
 interface DownloadFolderAccess {
     val state: StateFlow<FolderLinkState>
     suspend fun link(uri: String): FolderLinkResult
+    suspend fun unlink()
 }
 
 enum class StartupStatus { LOADING, READY, ERROR }

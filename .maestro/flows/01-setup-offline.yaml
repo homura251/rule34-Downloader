@@ -1,0 +1,57 @@
+appId: com.homura251.rule34downloader.e2e
+name: 01-setup-offline
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: reset=1
+- launchApp:
+    clearState: true
+- assertVisible: "连接你的 API"
+- scrollUntilVisible:
+    element: "稍后配置，浏览本地资料库"
+    direction: DOWN
+- tapOn: "稍后配置，浏览本地资料库"
+- assertVisible: "连接 API 后开始同步"
+- tapOn:
+    id: nav-gallery
+- assertVisible: "还没有作品"
+- tapOn:
+    id: nav-tasks
+- assertVisible: "没有任务"
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.lists == 0 && output.originals == 0}
+- tapOn:
+    id: nav-settings
+- tapOn:
+    id: api-user-id
+- inputText: "42"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: api-key
+    direction: DOWN
+- tapOn:
+    id: api-key
+- inputText: "wrong-key"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: verify-api
+    direction: DOWN
+- tapOn:
+    id: verify-api
+- assertVisible: "API 认证失败，请重新验证 User ID 与 API Key。"
+- tapOn:
+    id: api-key
+- eraseText
+- inputText: "fixture-key"
+- hideKeyboard
+- tapOn:
+    id: verify-api
+- assertVisible: "已连接 · User ID 42"
+- stopApp
+- launchApp
+- assertVisible:
+    id: add-author
+- takeScreenshot: setup-relaunch

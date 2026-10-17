@@ -162,6 +162,11 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
         mutable.update { it.copy(settings = services.settings.snapshot()) }
         notify(result.description())
     }
+    fun unlinkFolder() = action {
+        services.folders.unlink()
+        mutable.update { it.copy(settings = services.settings.snapshot()) }
+        notify("旧目录关联已取消，未暂停的任务已重新安排；已有文件和订阅保留。")
+    }
 }
 
 internal fun FolderLinkResult.description(): String = buildString {

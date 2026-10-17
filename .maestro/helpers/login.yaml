@@ -1,0 +1,31 @@
+appId: com.homura251.rule34downloader.e2e
+---
+- scrollUntilVisible:
+    element:
+      id: api-user-id
+    direction: UP
+- tapOn:
+    id: api-user-id
+- inputText: "42"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: api-key
+    direction: DOWN
+- tapOn:
+    id: api-key
+- inputText: "fixture-key"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: verify-api
+    direction: DOWN
+- tapOn:
+    id: verify-api
+- extendedWaitUntil:
+    notVisible: "正在验证…"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: nav-subscriptions
+    timeout: 30000

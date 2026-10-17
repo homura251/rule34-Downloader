@@ -1,0 +1,144 @@
+appId: com.homura251.rule34downloader.e2e
+name: 02-subscriptions-gallery
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: reset=1
+- launchApp:
+    clearState: true
+- runFlow: ../helpers/login.yaml
+- tapOn:
+    id: add-author
+- tapOn:
+    id: author-input
+- inputText: "pool:123"
+- hideKeyboard
+- tapOn: "继续"
+- assertVisible: "纯 API 模式暂不支持新增 Pool；已有图集仍可离线查看。"
+- tapOn: "取消"
+- tapOn:
+    id: add-author
+- tapOn:
+    id: author-input
+- inputText: "https://rule34.xxx/index.php?page=post&s=view&id=101"
+- hideKeyboard
+- tapOn: "继续"
+- assertVisible: "maestro_alpha"
+- assertVisible: "maestro_beta"
+- tapOn: "maestro_alpha"
+- tapOn: "订阅并同步"
+- extendedWaitUntil:
+    visible: "3 已下载 · 0 待下载"
+    timeout: 60000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 3}
+- runFlow:
+    file: ../helpers/subscribe.yaml
+    env:
+      ARTIST: maestro_alpha
+- assertVisible: "这个作者已经在订阅列表中。"
+- tapOn: "取消"
+- tapOn:
+    id: browse-maestro_alpha
+- assertVisible: "3 件作品 · 本地优先"
+- tapOn:
+    id: gallery-filter-IMAGES
+- assertVisible: "2 件作品 · 本地优先"
+- tapOn:
+    id: gallery-post-maestro_alpha-102
+- assertVisible: "#102 · 1/2"
+- swipe:
+    direction: LEFT
+- assertVisible: "#101 · 2/2"
+- tapOn: "关闭预览"
+- tapOn:
+    id: gallery-filter-VIDEOS
+- assertVisible: "1 件作品 · 本地优先"
+- tapOn:
+    id: gallery-post-maestro_alpha-103
+- assertVisible: "视频作品"
+- assertVisible: "播放已下载视频"
+- tapOn: "关闭预览"
+- tapOn:
+    id: gallery-filter-FAILED
+- assertVisible: "0 件作品 · 本地优先"
+- tapOn: "返回"
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: visible=4
+- tapOn:
+    id: sync-maestro_alpha
+- extendedWaitUntil:
+    visible: "4 已下载 · 0 待下载"
+    timeout: 60000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 4}
+- tapOn:
+    id: sync-maestro_alpha
+- extendedWaitUntil:
+    visible: "已完成"
+    timeout: 30000
+- tapOn:
+    id: recovery-maestro_alpha
+- tapOn:
+    id: rescan-maestro_alpha
+- tapOn: "取消"
+- tapOn:
+    id: recovery-maestro_alpha
+- tapOn:
+    id: rescan-maestro_alpha
+- tapOn:
+    id: confirm-rescan-maestro_alpha
+- extendedWaitUntil:
+    visible: "已完成"
+    timeout: 30000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 4}
+- tapOn:
+    id: artist-menu-maestro_alpha
+- tapOn:
+    id: remove-maestro_alpha
+- tapOn: "取消"
+- assertVisible:
+    id: artist-maestro_alpha
+- tapOn:
+    id: artist-menu-maestro_alpha
+- tapOn:
+    id: remove-maestro_alpha
+- tapOn:
+    id: confirm-remove
+- extendedWaitUntil:
+    visible: "添加第一位作者"
+    timeout: 30000
+- runFlow:
+    file: ../helpers/subscribe.yaml
+    env:
+      ARTIST: maestro_alpha
+- extendedWaitUntil:
+    visible: "4 已下载 · 0 待下载"
+    timeout: 60000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 4}
+- tapOn:
+    id: nav-settings
+- scrollUntilVisible:
+    element: "清除 API 凭据"
+    direction: DOWN
+- tapOn: "清除 API 凭据"
+- tapOn: "取消"
+- assertVisible: "已连接 · User ID 42"
+- tapOn: "清除 API 凭据"
+- tapOn:
+    id: confirm-clear-account
+- assertVisible: "尚未连接"
+- tapOn:
+    id: nav-gallery
+- assertVisible: "4 件作品 · 离线浏览"
+- tapOn:
+    id: gallery-filter-DOWNLOADED
+- assertVisible: "4 件作品 · 离线浏览"
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 4}
+- takeScreenshot: offline-downloaded-gallery
