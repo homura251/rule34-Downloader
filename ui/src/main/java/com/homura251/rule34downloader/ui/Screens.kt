@@ -21,6 +21,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -270,7 +271,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
         item { SettingsSection(if (setup) "API 凭据" else "账号与 API") {
             Text(when (account.status) { AccountStatus.READY -> "已连接 · User ID ${account.userId}"; AccountStatus.INVALID -> "凭据需要重新验证"; else -> "尚未连接" }, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             CredentialsForm(state, account, viewModel)
-            TextButton({ uriHandler.openUri("https://rule34.xxx/index.php?page=account&s=options") }) { Text("打开网站获取 API 凭据") }
+            TextButton({ viewModel.openApiOptions { uriHandler.openUri("https://rule34.xxx/index.php?page=account&s=options") } }) { Text("打开网站获取 API 凭据") }
             if (!setup && account.status in setOf(AccountStatus.READY, AccountStatus.INVALID)) TextButton({ clear = true }) { Text("清除 API 凭据") }
         } }
         if (setup) item {
@@ -322,6 +323,7 @@ private fun CredentialsForm(state: SettingsUiState, account: AccountState, viewM
     var showKey by remember { mutableStateOf(false) }
     OutlinedTextField(state.userId, viewModel::userId, Modifier.fillMaxWidth().testTag("api-user-id"), label = { Text("User ID") }, singleLine = true, enabled = !state.validating, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
     OutlinedTextField(state.apiKey, viewModel::apiKey, Modifier.fillMaxWidth().testTag("api-key"), label = { Text("API Key") }, singleLine = true, enabled = !state.validating,
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
         supportingText = { if (account.userId.isNotEmpty()) Text("留空可重新验证当前设备保存的密钥。") },
         visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = { IconButton({ showKey = !showKey }) { Icon(if (showKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, "显示或隐藏密钥") } })
@@ -361,7 +363,8 @@ fun AddSubscriptionDialog(viewModel: AddSubscriptionViewModel, onDismiss: () -> 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("输入作者标签，或粘贴帖子链接 / ID。")
-                OutlinedTextField(state.input, viewModel::input, Modifier.fillMaxWidth().testTag("author-input"), label = { Text("作者标签 / 帖子") }, enabled = !state.resolving && !state.saving, singleLine = true)
+                OutlinedTextField(state.input, viewModel::input, Modifier.fillMaxWidth().testTag("author-input"), label = { Text("作者标签 / 帖子") }, enabled = !state.resolving && !state.saving, singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Uri))
                 if (state.resolving) CircularProgressIndicator(Modifier.size(24.dp))
                 state.candidates.forEach { candidate ->
                     Row(Modifier.fillMaxWidth().clickable { viewModel.select(candidate.name) }, verticalAlignment = Alignment.CenterVertically) {

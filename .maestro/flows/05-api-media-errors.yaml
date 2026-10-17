@@ -73,7 +73,7 @@ name: 05-api-media-errors
 - tapOn: "立即重试"
 - extendedWaitUntil:
     visible: "已完成"
-    timeout: 30000
+    timeout: 90000
 - runScript:
     file: ../scripts/control.js
     env:

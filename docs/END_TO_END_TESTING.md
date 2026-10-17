@@ -6,7 +6,7 @@
 | --- | --- |
 | 首次启动、跳过配置、四个页面、无凭据不扫描 | Maestro `01-setup-offline` |
 | 错误 key、保存凭据、重启后保留、留空重新验证 | Maestro `01`、`05` |
-| 帖子链接、多作者选择、直接标签、重复订阅、Pool 提示 | Maestro `02-subscriptions-gallery` |
+| 帖子链接、多作者选择、直接标签、重复订阅、Pool 提示、输入法不改写链接或密钥 | Maestro `02-subscriptions-gallery`；作者输入使用 URI 键盘，密钥使用密码键盘，两者关闭自动纠正 |
 | 图片、GIF、视频原文件、列表筛选、预览翻页、离线浏览 | Maestro `02`；结束后通过 adb 读回文件并核对 MD5 |
 | 新作品增量、重复同步、从头扫描、移除重加复用 | Maestro `02`；`BusinessFlowsEndToEndTest` 检查原 URI、请求次数及水位 |
 | 暂停全部、暂停任务筛选、重启保留暂停、继续任务 | Maestro `03-pause-recovery`；`ApiAppEndToEndTest` |

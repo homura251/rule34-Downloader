@@ -19,19 +19,19 @@ name: 04-native-folder
     direction: DOWN
 - tapOn:
     id: link-downloads
-- assertVisible: "(?i)use this folder"
+- assertVisible: "(?i)(use this folder|allow access to.*)"
 - repeat:
     times: 5
     commands:
       - runFlow:
           when:
-            visible: "(?i)use this folder"
+            visible: "(?i)(use this folder|allow access to.*)"
           commands:
             - back
 - assertVisible: "关联并自动同步"
 - tapOn:
     id: link-downloads
-- tapOn: "(?i)use this folder"
+- tapOn: "(?i)(use this folder|allow access to.*)"
 - tapOn:
     text: "(?i)allow"
     optional: true

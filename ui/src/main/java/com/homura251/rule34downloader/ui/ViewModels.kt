@@ -143,6 +143,10 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
         mutable.update { it.copy(userId = "", apiKey = "", accountError = null) }
         notify("API 凭据已清除，可以继续浏览本地作品。")
     }
+    fun openApiOptions(open: () -> Unit) {
+        try { open() }
+        catch (_: Exception) { notify("无法打开网站，请确认已安装并启用浏览器。") }
+    }
     fun saveSettings() {
         if (state.value.saving) return
         mutable.update { it.copy(saving = true) }

@@ -85,5 +85,5 @@ name: 03-pause-recovery
     checked: true
 - assertVisible:
     id: sync-interval-15
-    selected: true
+    checked: true
 - takeScreenshot: settings-persisted
