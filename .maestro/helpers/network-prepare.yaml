@@ -1,0 +1,10 @@
+appId: com.homura251.rule34downloader.e2e
+name: 07-network-prepare
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: reset=1
+- launchApp:
+    clearState: true
+- runFlow: login.yaml

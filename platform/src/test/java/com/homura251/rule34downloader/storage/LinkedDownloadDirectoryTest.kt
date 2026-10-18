@@ -79,6 +79,28 @@ class LinkedDownloadDirectoryTest {
         val plan = FolderRestorePlan.create(scan.directories, emptyList(), scan.wholeLibrary)
         assertEquals(setOf("artist_one"), plan.targets)
     }
+    @Test fun emptyAuthorSubdirectoriesRestoreWithoutAnyMediaFiles() {
+        provider.root("Rule34 Downloader")
+        provider.directory("root", "artist_one")
+        val second = provider.directory("root", "artist two")
+        provider.directory(second, "images")
+        val scan = reader().scan()
+        assertEquals(0, scan.totalFiles)
+        val plan = FolderRestorePlan.create(scan.directories, emptyList(), scan.wholeLibrary)
+        assertEquals(setOf("artist_one", "artist_two"), plan.targets)
+        assertTrue(plan.additions.all { it.sourcePostId == 0L })
+        assertEquals(0, plan.unrecognizedDirectories)
+    }
+    @Test fun renamedOriginalsDoNotRequireManuallyEnteringTheAuthorDirectoryName() {
+        provider.root("Rule34 Downloader")
+        author("root", name = "artist one", filename = "renamed-original.png")
+        val scan = reader().scan()
+        assertEquals(0, scan.identifiedFiles)
+        assertEquals(1, scan.mediaFiles)
+        val plan = FolderRestorePlan.create(scan.directories, emptyList(), scan.wholeLibrary)
+        assertEquals(setOf("artist_one"), plan.targets)
+        assertEquals(0, plan.unrecognizedDirectories)
+    }
     @Test fun aProviderStillLoadingIsNotTreatedAsAnEmptyFolder() {
         provider.root("Rule34 Downloader")
         provider.loading = true

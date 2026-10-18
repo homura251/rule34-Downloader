@@ -11,7 +11,7 @@ import com.homura251.rule34downloader.work.DownloaderWorkerFactory
 
 class Rule34Application : Application(), ImageLoaderFactory, Configuration.Provider, BackgroundRuntimeOwner {
     private var overrideGraph: AppGraph? = null
-    private val defaultGraph by lazy { AppGraph(this) }
+    private val defaultGraph by lazy { createDefaultGraph(this) }
     val graph: AppGraph get() = overrideGraph ?: defaultGraph
     override val backgroundRuntime get() = graph.background
     override val workManagerConfiguration: Configuration

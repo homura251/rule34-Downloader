@@ -1,0 +1,100 @@
+appId: com.homura251.rule34downloader.e2e
+name: 03-pause-recovery
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: reset=1&slow=1
+- launchApp:
+    clearState: true
+    permissions:
+      all: deny
+- runFlow: ../helpers/login.yaml
+- runFlow:
+    file: ../helpers/subscribe.yaml
+    env:
+      ARTIST: maestro_pause
+- tapOn:
+    id: nav-tasks
+- extendedWaitUntil:
+    visible: "下载中"
+    timeout: 30000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 1}
+- tapOn: "全部暂停"
+- extendedWaitUntil:
+    visible: "继续"
+    timeout: 30000
+- assertVisible:
+    id: task-sync-maestro_pause
+- stopApp
+- launchApp:
+    permissions:
+      all: deny
+- extendedWaitUntil:
+    visible: "已暂停"
+    timeout: 60000
+- tapOn:
+    id: nav-tasks
+- tapOn:
+    id: task-filter-已暂停
+- assertVisible: "maestro_pause"
+- tapOn: "继续暂停任务"
+- runFlow: ../helpers/deny-notifications.yaml
+- tapOn:
+    id: task-filter-全部
+- extendedWaitUntil:
+    visible: "3 已下载 · 0 待下载 · 0 失败"
+    timeout: 60000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 4}
+- tapOn:
+    id: nav-settings
+- scrollUntilVisible:
+    element:
+      id: wifi-only
+    direction: DOWN
+- tapOn:
+    id: wifi-only
+- scrollUntilVisible:
+    element:
+      id: auto-sync
+    direction: DOWN
+- tapOn:
+    id: auto-sync
+- tapOn: "15 分钟"
+- scrollUntilVisible:
+    element:
+      id: save-settings
+    direction: DOWN
+- tapOn:
+    id: save-settings
+- assertVisible: "下载设置已保存。"
+- stopApp
+- launchApp:
+    permissions:
+      all: deny
+- extendedWaitUntil:
+    visible:
+      id: nav-settings
+    timeout: 60000
+- tapOn:
+    id: nav-settings
+- scrollUntilVisible:
+    element:
+      id: wifi-only
+    direction: DOWN
+- assertVisible:
+    id: wifi-only
+    checked: true
+- scrollUntilVisible:
+    element:
+      id: auto-sync
+    direction: DOWN
+- assertVisible:
+    id: auto-sync
+    checked: true
+- assertVisible:
+    id: sync-interval-15
+    checked: true
+- takeScreenshot: settings-persisted

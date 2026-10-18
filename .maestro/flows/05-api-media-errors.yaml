@@ -1,0 +1,107 @@
+appId: com.homura251.rule34downloader.e2e
+name: 05-api-media-errors
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: reset=1&media=forbidden
+- launchApp:
+    clearState: true
+- runFlow: ../helpers/login.yaml
+- runFlow:
+    file: ../helpers/subscribe.yaml
+    env:
+      ARTIST: maestro_retry
+- tapOn:
+    id: nav-tasks
+- extendedWaitUntil:
+    visible: "2 已下载 · 0 待下载 · 1 失败"
+    timeout: 30000
+- tapOn:
+    id: nav-gallery
+- tapOn:
+    id: gallery-filter-FAILED
+- assertVisible: "1 件作品 · 本地优先"
+- tapOn:
+    id: nav-settings
+- scrollUntilVisible:
+    element: "清除 API 凭据"
+    direction: DOWN
+- tapOn: "清除 API 凭据"
+- tapOn:
+    id: confirm-clear-account
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: media=none
+- runScript: ../scripts/stats.js
+- evalScript: ${output.beforeKnownLists = output.lists}
+- tapOn:
+    id: nav-tasks
+- scrollUntilVisible:
+    element:
+      id: download-known-maestro_retry
+    direction: DOWN
+- tapOn:
+    id: download-known-maestro_retry
+- extendedWaitUntil:
+    visible: "已发现文件已下载"
+    timeout: 60000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 4 && output.lists == output.beforeKnownLists}
+- tapOn:
+    id: nav-settings
+- runFlow: ../helpers/login.yaml
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: api=rate
+- tapOn:
+    id: nav-tasks
+- tapOn:
+    id: recovery-maestro_retry
+- tapOn:
+    id: retry-scan-maestro_retry
+- extendedWaitUntil:
+    visible: "等待重试"
+    timeout: 30000
+- assertVisible: ".*限流.*"
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: api=none
+- tapOn: "立即重试"
+- extendedWaitUntil:
+    visible: "已完成"
+    timeout: 90000
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: api=auth
+- tapOn:
+    id: task-sync-maestro_retry
+- extendedWaitUntil:
+    visible: "API 凭据需要验证"
+    timeout: 30000
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: api=none
+- tapOn:
+    id: nav-settings
+- tapOn:
+    id: verify-api
+- scrollUntilVisible:
+    element: "已连接 · User ID 42"
+    direction: UP
+- extendedWaitUntil:
+    visible: "已连接 · User ID 42"
+    timeout: 30000
+- tapOn:
+    id: nav-tasks
+- extendedWaitUntil:
+    visible: "已完成"
+    timeout: 30000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 4}
+- takeScreenshot: api-revalidated-no-redownload

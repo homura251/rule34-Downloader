@@ -1,0 +1,9 @@
+appId: com.homura251.rule34downloader.e2e
+name: 09-network-resumed
+---
+- extendedWaitUntil:
+    visible: "3 已下载 · 0 待下载 · 0 失败"
+    timeout: 90000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 3}
+- takeScreenshot: network-restored-automatically

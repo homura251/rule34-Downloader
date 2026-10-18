@@ -1,0 +1,74 @@
+appId: com.homura251.rule34downloader.e2e
+name: 04-native-folder
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: reset=1
+- launchApp:
+    clearState: true
+- scrollUntilVisible:
+    element: "稍后配置，浏览本地资料库"
+    direction: DOWN
+- tapOn: "稍后配置，浏览本地资料库"
+- tapOn:
+    id: nav-settings
+- scrollUntilVisible:
+    element:
+      id: link-downloads
+    direction: DOWN
+- tapOn:
+    id: link-downloads
+- assertVisible: "(?i)(use this folder|allow access to.*)"
+- repeat:
+    times: 5
+    commands:
+      - runFlow:
+          when:
+            visible: "(?i)(use this folder|allow access to.*)"
+          commands:
+            - back
+- assertVisible: "关联并自动同步"
+- tapOn:
+    id: link-downloads
+- tapOn: "(?i)(use this folder|allow access to.*)"
+- tapOn:
+    text: "(?i)allow"
+    optional: true
+- extendedWaitUntil:
+    visible: ".*验证 API 后会自动同步.*"
+    timeout: 30000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.lists == 0 && output.originals == 0}
+- scrollUntilVisible:
+    element:
+      id: api-user-id
+    direction: UP
+- runFlow: ../helpers/login.yaml
+- tapOn:
+    id: nav-subscriptions
+- scrollUntilVisible:
+    element:
+      id: artist-maestro_restore
+    direction: DOWN
+- extendedWaitUntil:
+    visible: "3 已下载 · 0 待下载"
+    timeout: 60000
+- assertVisible:
+    id: artist-count-maestro_restore
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 0}
+- tapOn:
+    id: browse-maestro_restore
+- assertVisible: "3 件作品 · 本地优先"
+- takeScreenshot: recovered-old-author
+- tapOn: "返回"
+- tapOn:
+    id: nav-settings
+- scrollUntilVisible:
+    element:
+      id: unlink-downloads
+    direction: DOWN
+- tapOn:
+    id: unlink-downloads
+- assertVisible: "关联并自动同步"

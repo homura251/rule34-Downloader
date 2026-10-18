@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import java.util.Locale
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 
@@ -46,8 +47,16 @@ class BackgroundRuntime(
         if (ready.isCompleted) ready = CompletableDeferred()
         try {
         repository.recoverInterruptedRuns()
-        settings.snapshot()
+        val linkedFolder = settings.snapshot().existingDownloadsTreeUri
         account.state.first { it.status != AccountStatus.LOADING }
+        if (linkedFolder != null) {
+            try { restoreFolder(linkedFolder, resyncExisting = false) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                // A stale grant remains visible in folder state. It must not prevent
+                // opening settings to reconnect it or browsing the existing library.
+            }
+        }
         updateSchedule()
         if (!account.state.value.canUseApi) repository.suspendForAuthentication()
         for (collection in repository.getCollections()) {
@@ -105,14 +114,54 @@ class BackgroundRuntime(
         val preferences = settings.snapshot()
         repository.setSyncMode(id, mode)
         if (delayMillis == 0L) repository.markQueued(id)
-        val request = OneTimeWorkRequestBuilder<ArtistSyncWorker>()
+        val request = syncRequest(id, userInitiated, mode, preferences, delayMillis)
+        withContext(Dispatchers.IO) { manager.enqueueUniqueWork(workName(id), policy, request).result.get(10, TimeUnit.SECONDS) }
+        return true
+    }
+
+    private fun syncRequest(id: String, userInitiated: Boolean, mode: SyncMode, preferences: AppSettings,
+        delayMillis: Long, previous: WorkInfo? = null): OneTimeWorkRequest = OneTimeWorkRequestBuilder<ArtistSyncWorker>()
             .setInputData(workDataOf(ArtistSyncWorker.KEY_ARTIST_TAG to id, ArtistSyncWorker.KEY_USER_INITIATED to userInitiated,
                 ArtistSyncWorker.KEY_SYNC_MODE to mode.name))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(if (preferences.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED).build())
-            .setInitialDelay(delayMillis.coerceAtLeast(0), TimeUnit.MILLISECONDS)
-            .addTag(SYNC_TAG).addTag(workName(id)).apply { if (mode == SyncMode.FULL) addTag(API_SYNC_TAG) }.build()
-        withContext(Dispatchers.IO) { manager.enqueueUniqueWork(workName(id), policy, request).result.get(10, TimeUnit.SECONDS) }
-        return true
+            .setInitialDelay(previous?.initialDelayMillis ?: delayMillis.coerceAtLeast(0), TimeUnit.MILLISECONDS)
+            .addTag(SYNC_TAG).addTag(workName(id)).apply {
+                if (mode == SyncMode.FULL) addTag(API_SYNC_TAG)
+                if (userInitiated) addTag(USER_INITIATED_TAG)
+                if (previous != null) { setId(previous.id); previous.tags.forEach { addTag(it) } }
+            }.build()
+
+    private suspend fun updateNetworkConstraints(preferences: AppSettings) {
+        val network = if (preferences.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+        for (collection in repository.getCollections()) if (!collection.paused && collection.poolId == null) {
+            command(collection.tag).withLock {
+                val current = repository.getCollection(collection.tag) ?: return@withLock
+                if (current.paused || current.poolId != null) return@withLock
+                val pending = withContext(Dispatchers.IO) {
+                    manager.getWorkInfosForUniqueWork(workName(current.tag)).get(10, TimeUnit.SECONDS)
+                        .filter { !it.state.isFinished && it.constraints.requiredNetworkType != network }
+                }
+                if (pending.isEmpty()) return@withLock
+                // Updating pending work preserves its enqueue time and original initial delay,
+                // including server Retry-After. Re-enqueuing it would reset that deadline.
+                for (work in pending) withContext(Dispatchers.IO) {
+                    manager.updateWork(syncRequest(current.tag, USER_INITIATED_TAG in work.tags,
+                        current.syncMode, preferences, 0, work)).get(10, TimeUnit.SECONDS)
+                }
+                // updateWork does not interrupt an already running generation. Stop it before
+                // applying a stricter policy; filesystem gating preserves completed originals.
+                if (preferences.wifiOnly && pending.any { it.state == WorkInfo.State.RUNNING } &&
+                    current.syncState !in setOf(SyncState.WAITING_RETRY, SyncState.WAITING_NETWORK)) {
+                    withContext(NonCancellable) {
+                        SyncControls.pause(current.tag)
+                        withContext(Dispatchers.IO) { manager.cancelUniqueWork(workName(current.tag)).result.get(10, TimeUnit.SECONDS) }
+                        SyncControls.gate(MediaStoreDownloader.buildRelativePath(current.tag)).withLock {
+                            enqueue(current.tag, ExistingWorkPolicy.REPLACE, false, mode = current.syncMode)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     suspend fun followUp(id: String, delayMillis: Long, mode: SyncMode = SyncMode.FULL) = command(id).withLock {
@@ -127,10 +176,18 @@ class BackgroundRuntime(
         withContext(Dispatchers.IO) { manager.cancelUniqueWork(workName(id)).result.get(10, TimeUnit.SECONDS) }
         repository.finishPause(id)
     }
-    override suspend fun remove(id: String) = command(id).withLock {
+    override suspend fun remove(id: String) = folderLinks.withLock { command(id).withLock {
         pauseLocked(id)
-        SyncControls.gate(MediaStoreDownloader.buildRelativePath(id)).withLock { repository.removeCollection(id) }
-    }
+        SyncControls.gate(MediaStoreDownloader.buildRelativePath(id)).withLock {
+            withContext(NonCancellable) {
+                // Retained directories must not reactivate an explicitly removed author.
+                settings.update { current -> if (current.existingDownloadsTreeUri == null) current else current.copy(
+                    restoredAuthorTags = current.restoredAuthorTags + id,
+                    pendingFolderRestores = current.pendingFolderRestores.filterNot { it.equals(id, true) }.toSet()) }
+                repository.removeCollection(id)
+            }
+        }
+    } }
     override suspend fun pauseAll() {
         for (collection in repository.getCollections()) if (collection.poolId == null && !collection.paused) pause(collection.tag)
     }
@@ -164,6 +221,7 @@ class BackgroundRuntime(
     }
     override suspend fun updateSchedule() {
         val preferences = settings.snapshot()
+        updateNetworkConstraints(preferences)
         if (!preferences.autoSyncEnabled || !account.state.value.canUseApi) {
             manager.cancelUniqueWork(PERIODIC_NAME); return
         }
@@ -175,24 +233,46 @@ class BackgroundRuntime(
     override suspend fun folderChanged() {
         resyncLinkedFolders(repository.getCollections().filter { it.poolId == null }.mapTo(mutableSetOf()) { it.tag })
     }
-    private suspend fun resyncLinkedFolders(ids: Set<String>): Int {
-        if (!account.state.value.canUseApi) { repository.suspendForAuthentication(); return 0 }
+    private suspend fun resyncLinkedFolders(ids: Set<String>, preserveMode: Boolean = false): Int {
+        if (!account.state.value.canUseApi) {
+            repository.suspendForAuthentication()
+            if (!preserveMode) return 0
+        }
         var scheduled = 0
         for (collection in repository.getCollections()) if (collection.tag in ids && collection.poolId == null && !collection.paused) {
             command(collection.tag).withLock {
                 val current = repository.getCollection(collection.tag) ?: return@withLock
                 if (current.paused || current.poolId != null) return@withLock
+                val mode = if (preserveMode) current.syncMode else SyncMode.FULL
+                if (mode == SyncMode.FULL && !account.state.value.canUseApi) return@withLock
                 SyncControls.pause(collection.tag)
                 withContext(Dispatchers.IO) { manager.cancelUniqueWork(workName(collection.tag)).result.get(10, TimeUnit.SECONDS) }
                 SyncControls.gate(MediaStoreDownloader.buildRelativePath(collection.tag)).withLock {
                     repository.resetFailures(collection.tag)
-                    if (enqueue(collection.tag, ExistingWorkPolicy.REPLACE, true)) scheduled++
+                    if (enqueue(collection.tag, ExistingWorkPolicy.REPLACE, true, mode = mode)) scheduled++
                 }
             }
         }
         return scheduled
     }
-    override suspend fun link(uri: String): FolderLinkResult = folderLinks.withLock {
+    override suspend fun unlink() = folderLinks.withLock {
+        mutableFolderState.value = FolderLinkState(linking = true)
+        try {
+            withContext(NonCancellable) {
+                settings.update { it.copy(existingDownloadsTreeUri = null, restoredAuthorTags = emptySet(), pendingFolderRestores = emptySet()) }
+                // Existing saved SAF URIs may still depend on a valid read grant. Keep it so
+                // disconnecting lookup does not make the already restored gallery unreadable.
+                resyncLinkedFolders(repository.getCollections().mapTo(mutableSetOf()) { it.tag }, preserveMode = true)
+            }
+            mutableFolderState.value = FolderLinkState()
+        } catch (e: Exception) {
+            mutableFolderState.value = FolderLinkState(error = e.userMessage())
+            throw e
+        }
+    }
+    override suspend fun link(uri: String): FolderLinkResult = restoreFolder(uri, resyncExisting = true)
+
+    private suspend fun restoreFolder(uri: String, resyncExisting: Boolean): FolderLinkResult = folderLinks.withLock {
         mutableFolderState.value = FolderLinkState(linking = true)
         try {
             val tree = Uri.parse(uri)
@@ -201,17 +281,29 @@ class BackgroundRuntime(
             val knownFolders = repository.getCollections().mapTo(mutableSetOf()) { MediaStoreDownloader.sanitizeFolderName(it.tag) }
             val scan = withContext(Dispatchers.IO) { LinkedDownloadDirectory(context.contentResolver, tree,
                 { job.ensureActive() }, knownFolders).scan() }
-            val plan = FolderRestorePlan.create(scan.directories, repository.getCollections(), scan.wholeLibrary)
+            val preferences = settings.snapshot()
+            val sameFolder = preferences.existingDownloadsTreeUri == uri
+            val history = if (sameFolder) preferences.restoredAuthorTags else emptySet()
+            val pending = if (sameFolder) preferences.pendingFolderRestores else emptySet()
+            val plan = FolderRestorePlan.create(scan.directories, repository.getCollections(), scan.wholeLibrary,
+                history + pending, if (resyncExisting) history + pending else pending)
             // Once the association is saved, creating subscriptions and scheduling work must survive navigation.
             val result = withContext(NonCancellable) {
-                settings.save(settings.snapshot().copy(existingDownloadsTreeUri = uri))
-                var restored = 0
-                for (addition in plan.additions) if (repository.addCollection(addition.tag, addition.sourcePostId)) restored++
-                val scheduled = resyncLinkedFolders(plan.targets)
-                FolderLinkResult(restored, scheduled, plan.paused, plan.targets.isNotEmpty() && !account.state.value.canUseApi,
+                // Persist unfinished imports before creating records. A process restart
+                // can finish an explicit restore without reviving a later removal.
+                val requested = pending + plan.additions.map { it.tag }
+                settings.update { it.copy(existingDownloadsTreeUri = uri, restoredAuthorTags = history, pendingFolderRestores = requested) }
+                val restored = linkedSetOf<String>()
+                for (addition in plan.additions) if (repository.addCollection(addition.tag, addition.sourcePostId)) restored += addition.tag
+                val scheduled = resyncLinkedFolders(if (resyncExisting) plan.targets else restored)
+                val discovered = plan.discoveredAuthors.mapTo(hashSetOf()) { it.lowercase(Locale.ROOT) }
+                settings.update { it.copy(existingDownloadsTreeUri = uri, restoredAuthorTags = history + plan.discoveredAuthors,
+                    pendingFolderRestores = requested.filterNot { tag -> tag.lowercase(Locale.ROOT) in discovered }.toSet()) }
+                FolderLinkResult(restored.size, scheduled, plan.paused, plan.targets.isNotEmpty() && !account.state.value.canUseApi,
                     plan.poolDirectories, plan.unrecognizedDirectories, scan.name, scan.totalFiles, scan.identifiedFiles,
                     scan.unreadableDirectories.size, plan.unrecognizedDirectories > 0 ||
-                        (plan.targets.isEmpty() && plan.paused == 0 && scan.totalFiles > 0 && plan.poolDirectories == 0))
+                        (plan.targets.isEmpty() && plan.discoveredAuthors.isEmpty() && plan.paused == 0 && scan.totalFiles > 0 && plan.poolDirectories == 0),
+                    plan.removedAuthors)
             }
             mutableFolderState.value = FolderLinkState(result = result)
             result
@@ -260,6 +352,7 @@ class BackgroundRuntime(
     companion object {
         private const val SYNC_TAG = "rule34-sync"
         private const val API_SYNC_TAG = "rule34-api-sync"
+        private const val USER_INITIATED_TAG = "rule34-user-initiated"
         private const val PERIODIC_NAME = "rule34-periodic-discovery"
         fun workName(id: String) = "rule34-sync-$id"
     }

@@ -68,6 +68,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -95,12 +96,12 @@ fun GalleryScreen(viewModel: GalleryViewModel, allowRemote: Boolean, onSettings:
     var previewPosts by remember { mutableStateOf<List<GalleryPost>>(emptyList()) }
     var previewIndex by remember { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().testTag("gallery-filters").horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GalleryFilter.entries.forEach { value ->
-                FilterChip(selected = filter == value, onClick = { viewModel.filter(value) }, label = { Text(value.label) })
+                FilterChip(selected = filter == value, onClick = { viewModel.filter(value) }, label = { Text(value.label) }, modifier = Modifier.testTag("gallery-filter-${value.name}"))
             }
         }
-        Text("$total 件作品 · ${if (allowRemote) "本地优先" else "离线浏览"}", Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.labelLarge)
+        Text("$total 件作品 · ${if (allowRemote) "本地优先" else "离线浏览"}", Modifier.padding(horizontal = 20.dp, vertical = 12.dp).testTag("gallery-count"), style = MaterialTheme.typography.labelLarge)
         LazyVerticalGrid(columns = GridCells.Adaptive(148.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (posts.loadState.refresh is LoadState.Loading && posts.itemCount == 0) item(span = { GridItemSpan(maxLineSpan) }) {
@@ -140,7 +141,7 @@ private val GalleryFilter.label: String get() = when (this) {
 
 @Composable
 private fun GalleryCard(post: GalleryPost, allowRemote: Boolean, onOpen: () -> Unit) {
-    Card(onClick = onOpen) {
+    Card(onClick = onOpen, modifier = Modifier.testTag("gallery-post-${post.artistTag}-${post.postId}")) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceVariant)) {
             PostImage(post, allowRemote = allowRemote, fullSize = false, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             if (post.isVideo) Icon(
@@ -254,7 +255,7 @@ private fun ImagePreviewDialog(
                         "#${currentPost.postId} · ${pager.currentPage + 1}/${posts.size}",
                         Modifier.weight(1f), color = Color.White, maxLines = 1,
                     )
-                    IconButton(onSettings) { Icon(Icons.Rounded.Settings, "网页验证", tint = Color.White) }
+                    IconButton(onSettings) { Icon(Icons.Rounded.Settings, "API 设置", tint = Color.White) }
                     IconButton(onClick = {
                         openError = openMedia(context, currentPost, useLocalVideo = false)
                     }) { Icon(Icons.Rounded.OpenInNew, "打开原帖", tint = Color.White) }

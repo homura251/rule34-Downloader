@@ -17,8 +17,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,7 +89,7 @@ fun SubscriptionsScreen(viewModel: SubscriptionsViewModel, account: AccountState
                     Text("你的作品资料库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text("订阅作者，持续保存原文件。", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
                     Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                        Metric("订阅", collections.size.toString())
+                        Metric("订阅", collections.size.toString(), Modifier.testTag("subscriptions-total"))
                         Metric("已下载", downloaded.toString())
                         Metric("进行中", collections.count { it.syncState.active }.toString())
                     }
@@ -106,17 +109,17 @@ fun SubscriptionsScreen(viewModel: SubscriptionsViewModel, account: AccountState
         }
     }
     removing?.let { collection ->
-        AlertDialog(onDismissRequest = { removing = null }, title = { Text("移除订阅？") },
+        AlertDialog(onDismissRequest = { removing = null }, modifier = Modifier.semantics { testTagsAsResourceId = true }, title = { Text("移除订阅？") },
             text = { Text("${collection.title} 会从资料库移除，已下载文件保留在原目录。") },
-            confirmButton = { TextButton({ viewModel.remove(collection.tag); removing = null }) { Text("移除") } },
+            confirmButton = { TextButton({ viewModel.remove(collection.tag); removing = null }, Modifier.testTag("confirm-remove")) { Text("移除") } },
             dismissButton = { TextButton({ removing = null }) { Text("取消") } })
     }
 }
 
 @Composable
-private fun Metric(label: String, value: String) {
+private fun Metric(label: String, value: String, modifier: Modifier = Modifier) {
     Column {
-        Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(value, modifier, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(label, style = MaterialTheme.typography.labelMedium)
     }
 }
@@ -138,22 +141,22 @@ private fun CollectionCard(collection: CollectionSummary, canUseApi: Boolean, on
                     Text(if (collection.poolId != null) "Pool #${collection.poolId} · 本地归档" else "作者订阅", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Box {
-                    IconButton({ menu = true }) { Icon(Icons.Rounded.MoreVert, "更多操作") }
-                    DropdownMenu(menu, { menu = false }) {
+                    IconButton({ menu = true }, Modifier.testTag("artist-menu-${collection.tag}")) { Icon(Icons.Rounded.MoreVert, "更多操作") }
+                    DropdownMenu(menu, { menu = false }, modifier = Modifier.semantics { testTagsAsResourceId = true }) {
                         if (collection.poolId == null && collection.syncState.pausable && !collection.syncState.stoppable)
                             DropdownMenuItem(text = { Text("暂停订阅") }, onClick = { menu = false; onPause() })
-                        DropdownMenuItem(text = { Text("移除订阅") }, onClick = { menu = false; onRemove() })
+                        DropdownMenuItem(text = { Text("移除订阅") }, onClick = { menu = false; onRemove() }, modifier = Modifier.testTag("remove-${collection.tag}"))
                     }
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 StatusBadge(collection.syncState)
-                Text("${collection.downloadedCount} 已下载 · ${collection.pendingCount} 待下载", style = MaterialTheme.typography.labelMedium)
+                Text("${collection.downloadedCount} 已下载 · ${collection.pendingCount} 待下载", Modifier.testTag("artist-count-${collection.tag}"), style = MaterialTheme.typography.labelMedium)
             }
             collection.lastSyncAt?.let { Text("最近同步 ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             collection.lastError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onBrowse, modifier = Modifier.weight(1f)) { Text("查看作品") }
+                FilledTonalButton(onBrowse, modifier = Modifier.weight(1f).testTag("browse-${collection.tag}")) { Text("查看作品") }
                 if (collection.poolId == null) OutlinedButton(
                     onClick = if (collection.syncState.stoppable) onPause else onSync,
                     enabled = collection.syncState != SyncState.PAUSING && (collection.syncState.stoppable || canUseApi || (collection.syncState == SyncState.PAUSED && collection.syncMode == SyncMode.KNOWN_FILES)),
@@ -188,7 +191,7 @@ fun TasksScreen(viewModel: TasksViewModel, canUseApi: Boolean, snackbar: Snackba
         "需处理" -> it.failedCount > 0 || it.syncState in setOf(SyncState.ERROR, SyncState.BLOCKED, SyncState.SCAN_INCOMPLETE, SyncState.WAITING_AUTH)
         else -> true
     } }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("tasks-list"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Metric("待下载", jobs.sumOf { it.pendingCount }.toString())
@@ -205,12 +208,12 @@ fun TasksScreen(viewModel: TasksViewModel, canUseApi: Boolean, snackbar: Snackba
         }
         item {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("全部", "进行中", "已暂停", "需处理").forEach { value -> FilterChip(filter == value, { filter = value }, label = { Text(value) }) }
+                listOf("全部", "进行中", "已暂停", "需处理").forEach { value -> FilterChip(filter == value, { filter = value }, label = { Text(value) }, modifier = Modifier.testTag("task-filter-$value")) }
             }
         }
         if (shown.isEmpty()) item { EmptyState("没有${if (filter == "全部") "任务" else filter + "任务"}", "订阅同步与下载进度会集中显示在这里。") }
         items(shown, key = { it.tag }) { collection ->
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth().testTag("task-${collection.tag}")) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(collection.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
@@ -268,30 +271,34 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
         item { SettingsSection(if (setup) "API 凭据" else "账号与 API") {
             Text(when (account.status) { AccountStatus.READY -> "已连接 · User ID ${account.userId}"; AccountStatus.INVALID -> "凭据需要重新验证"; else -> "尚未连接" }, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             CredentialsForm(state, account, viewModel)
-            TextButton({ uriHandler.openUri("https://rule34.xxx/index.php?page=account&s=options") }) { Text("打开网站获取 API 凭据") }
+            TextButton({ viewModel.openApiOptions { uriHandler.openUri("https://rule34.xxx/index.php?page=account&s=options") } }) { Text("打开网站获取 API 凭据") }
             if (!setup && account.status in setOf(AccountStatus.READY, AccountStatus.INVALID)) TextButton({ clear = true }) { Text("清除 API 凭据") }
         } }
         if (setup) item {
             TextButton(onBrowseOffline, modifier = Modifier.fillMaxWidth()) { Text("稍后配置，浏览本地资料库") }
         } else {
             item { SettingsSection("下载与同步") {
-                SettingSwitch("仅非计费网络", "手动下载和自动同步都遵循此设置。", state.settings.wifiOnly) { viewModel.settings(state.settings.copy(wifiOnly = it)) }
-                SettingSwitch("自动检查新作品", "系统根据网络与电量条件安排检查。", state.settings.autoSyncEnabled) {
+                SettingSwitch("仅非计费网络", "手动下载和自动同步都遵循此设置。", state.settings.wifiOnly, Modifier.testTag("wifi-only")) { viewModel.settings(state.settings.copy(wifiOnly = it)) }
+                SettingSwitch("自动检查新作品", "系统根据网络与电量条件安排检查。", state.settings.autoSyncEnabled, Modifier.testTag("auto-sync")) {
                     if (it) onRequestNotifications()
                     viewModel.settings(state.settings.copy(autoSyncEnabled = it))
                 }
                 if (state.settings.autoSyncEnabled) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(15L to "15 分钟", 60L to "1 小时", 360L to "6 小时", 1440L to "24 小时").forEach { (minutes, label) ->
-                        FilterChip(state.settings.syncIntervalMinutes == minutes, { viewModel.settings(state.settings.copy(syncIntervalMinutes = minutes)) }, label = { Text(label) })
+                        FilterChip(state.settings.syncIntervalMinutes == minutes, { viewModel.settings(state.settings.copy(syncIntervalMinutes = minutes)) }, label = { Text(label) }, modifier = Modifier.testTag("sync-interval-$minutes"))
                     }
                 }
-                Button(viewModel::saveSettings, enabled = state.loaded && !state.saving && !folder.linking) { Text(if (state.saving) "保存中…" else "保存下载设置") }
+                Button(viewModel::saveSettings, enabled = state.loaded && !state.saving && !folder.linking, modifier = Modifier.testTag("save-settings")) { Text(if (state.saving) "保存中…" else "保存下载设置") }
             } }
             item { SettingsSection("存储与恢复") {
                 Text("原文件保存到 Download/Rule34 Downloader/<作者>/。", style = MaterialTheme.typography.bodyMedium)
-                Text("可选择作者目录或其上层目录，支持多层子目录和旧文件名。自动识别作者后恢复订阅并同步；无法识别时可手动添加作者，校验后复用文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("选择作者目录或其上层目录，会按目录名自动恢复订阅并同步，空目录也支持。启动会发现新增作者；已移除订阅保持移除，重新关联可恢复。已有文件校验后复用。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedButton(onLinkFolder, enabled = !folder.linking, modifier = Modifier.testTag("link-downloads")) {
                     Text(if (folder.linking) "正在扫描并安排同步…" else if (state.settings.existingDownloadsTreeUri == null) "关联并自动同步" else "重新关联并同步")
+                }
+                if (state.settings.existingDownloadsTreeUri != null) {
+                    TextButton(viewModel::unlinkFolder, enabled = !folder.linking, modifier = Modifier.testTag("unlink-downloads")) { Text("取消目录关联") }
+                    Text("停止扫描此旧目录；已有文件和订阅保留。目录失效时，可取消关联后继续下载。", style = MaterialTheme.typography.bodySmall)
                 }
                 folder.result?.let { Text(it.copy(waitingForApi = it.waitingForApi && !account.canUseApi).description(), style = MaterialTheme.typography.bodySmall) }
                 if (folder.result?.manualRecovery == true) {
@@ -307,8 +314,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
             } }
         }
     }
-    if (clear) AlertDialog(onDismissRequest = { clear = false }, title = { Text("清除 API 凭据？") }, text = { Text("联网任务将挂起，已下载文件与队列会保留。") },
-        confirmButton = { TextButton({ clear = false; viewModel.clearAccount() }) { Text("清除") } }, dismissButton = { TextButton({ clear = false }) { Text("取消") } })
+    if (clear) AlertDialog(onDismissRequest = { clear = false }, modifier = Modifier.semantics { testTagsAsResourceId = true }, title = { Text("清除 API 凭据？") }, text = { Text("联网任务将挂起，已下载文件与队列会保留。") },
+        confirmButton = { TextButton({ clear = false; viewModel.clearAccount() }, Modifier.testTag("confirm-clear-account")) { Text("清除") } }, dismissButton = { TextButton({ clear = false }) { Text("取消") } })
 }
 
 @Composable
@@ -316,6 +323,7 @@ private fun CredentialsForm(state: SettingsUiState, account: AccountState, viewM
     var showKey by remember { mutableStateOf(false) }
     OutlinedTextField(state.userId, viewModel::userId, Modifier.fillMaxWidth().testTag("api-user-id"), label = { Text("User ID") }, singleLine = true, enabled = !state.validating, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
     OutlinedTextField(state.apiKey, viewModel::apiKey, Modifier.fillMaxWidth().testTag("api-key"), label = { Text("API Key") }, singleLine = true, enabled = !state.validating,
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
         supportingText = { if (account.userId.isNotEmpty()) Text("留空可重新验证当前设备保存的密钥。") },
         visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = { IconButton({ showKey = !showKey }) { Icon(if (showKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, "显示或隐藏密钥") } })
@@ -337,13 +345,13 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
 }
 
 @Composable
-private fun SettingSwitch(title: String, caption: String, value: Boolean, onValue: (Boolean) -> Unit) {
+private fun SettingSwitch(title: String, caption: String, value: Boolean, modifier: Modifier = Modifier, onValue: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 16.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(caption, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(value, onValue)
+        Switch(value, onValue, modifier)
     }
 }
 
@@ -351,11 +359,12 @@ private fun SettingSwitch(title: String, caption: String, value: Boolean, onValu
 fun AddSubscriptionDialog(viewModel: AddSubscriptionViewModel, onDismiss: () -> Unit, onRequestNotifications: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(state.added) { if (state.added) onDismiss() }
-    AlertDialog(onDismissRequest = { if (!state.saving) onDismiss() }, title = { Text("添加作者订阅") },
+    AlertDialog(onDismissRequest = { if (!state.saving) onDismiss() }, modifier = Modifier.semantics { testTagsAsResourceId = true }, title = { Text("添加作者订阅") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("输入作者标签，或粘贴帖子链接 / ID。")
-                OutlinedTextField(state.input, viewModel::input, Modifier.fillMaxWidth().testTag("author-input"), label = { Text("作者标签 / 帖子") }, enabled = !state.resolving && !state.saving, singleLine = true)
+                OutlinedTextField(state.input, viewModel::input, Modifier.fillMaxWidth().testTag("author-input"), label = { Text("作者标签 / 帖子") }, enabled = !state.resolving && !state.saving, singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Uri))
                 if (state.resolving) CircularProgressIndicator(Modifier.size(24.dp))
                 state.candidates.forEach { candidate ->
                     Row(Modifier.fillMaxWidth().clickable { viewModel.select(candidate.name) }, verticalAlignment = Alignment.CenterVertically) {

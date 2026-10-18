@@ -22,8 +22,8 @@ android {
         applicationId = "com.homura251.rule34downloader"
         minSdk = 29
         targetSdk = 36
-        versionCode = 17
-        versionName = "2.0.4"
+        versionCode = 20
+        versionName = "2.0.7"
 
         testInstrumentationRunner = "com.homura251.rule34downloader.ApiAndroidJUnitRunner"
     }
@@ -52,6 +52,12 @@ android {
                 "proguard-rules.pro",
             )
         }
+        create("e2e") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".e2e"
+            versionNameSuffix = "-e2e"
+            matchingFallbacks += "debug"
+        }
     }
 
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -59,6 +65,13 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    sourceSets.getByName("debug").kotlin.srcDir("src/production/java")
+    sourceSets.getByName("release").kotlin.srcDir("src/production/java")
+    sourceSets.getByName("e2e").apply {
+        manifest.srcFile("src/debug/AndroidManifest.xml")
+        res.srcDir("src/debug/res")
     }
 
     if (providers.gradleProperty("bulkSiteTest").orNull == "true") {

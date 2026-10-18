@@ -1,0 +1,13 @@
+appId: com.homura251.rule34downloader.e2e
+---
+- runFlow:
+    when:
+      notVisible:
+        id: gallery-filter-${FILTER}
+    commands:
+      - swipe:
+          from:
+            id: gallery-filters
+          direction: LEFT
+- tapOn:
+    id: gallery-filter-${FILTER}

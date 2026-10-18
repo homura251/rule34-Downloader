@@ -1,0 +1,11 @@
+flows:
+  - "flows/*.yaml"
+executionOrder:
+  continueOnFailure: true
+  flowsOrder:
+    - 01-setup-offline
+    - 02-subscriptions-gallery
+    - 03-pause-recovery
+    - 04-native-folder
+    - 05-api-media-errors
+    - 06-process-death

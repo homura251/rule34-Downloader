@@ -78,7 +78,7 @@ internal class LinkedDownloadDirectory(private val resolver: ContentResolver, pr
         val app = path.indexOfLast { isAppDirectory(it.name) }
         if (app >= 0) return path.drop(app + 1).firstOrNull { !isMediaContainer(it.name) && !isWrapper(it.name) }
             ?: path[app]
-        return path.lastOrNull { !isMediaContainer(it.name) } ?: root
+        return path.lastOrNull { !isMediaContainer(it.name) && !isWrapper(it.name) } ?: root
     }
 
     fun scan(): Scan {
@@ -138,7 +138,7 @@ internal class LinkedDownloadDirectory(private val resolver: ContentResolver, pr
         private val MEDIA_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "apng", "jxl", "heic", "heif", "tif", "tiff", "mp4", "webm", "m4v", "mov", "swf")
         private fun normalized(name: String) = name.lowercase().filter(Char::isLetterOrDigit)
         private fun isAppDirectory(name: String) = normalized(name) in setOf("rule34downloader", "r34downloader")
-        private fun isWrapper(name: String) = normalized(name) in setOf("artists", "authors", "downloads", "download", "backup", "backupfiles")
+        private fun isWrapper(name: String) = normalized(name) in setOf("artists", "authors", "downloads", "download", "backup", "backups", "backupfiles", "archive", "archives", "下载", "作者", "画师", "备份")
         private fun isMediaContainer(name: String) = normalized(name) in setOf("images", "image", "videos", "video", "pictures", "originals", "original", "media", "图片", "视频", "原图") || name.matches(Regex("(?:19|20)[0-9]{2}"))
         private fun isMedia(entry: Entry) = !entry.directory && (entry.mimeType.startsWith("image/") ||
             entry.mimeType.startsWith("video/") || entry.name.substringAfterLast('.', "").lowercase() in MEDIA_EXTENSIONS ||
