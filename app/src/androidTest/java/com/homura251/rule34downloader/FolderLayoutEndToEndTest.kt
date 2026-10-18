@@ -128,9 +128,10 @@ class FolderLayoutEndToEndTest {
         }
         ui.waitUntil(20_000) { ui.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty() }
         try {
-            // The regression starts with directories only, without even seeding a file.
+            // Register the paths with the system provider, then remove every file.
+            // Recovery itself starts with genuinely empty author directories.
             for (folder in listOf("folder_empty_one", "folder empty two/images", "folder_empty_paused")) {
-                device.executeShellCommand("mkdir -p '/sdcard/$root/$folder/'")
+                seed("$root/$folder/").forEach { assertEquals(1, app.contentResolver.delete(it, null, null)) }
             }
             read {
                 graph.library.addCollection(tags.last(), 0)
@@ -200,6 +201,13 @@ class FolderLayoutEndToEndTest {
             assertEquals(0, origin.authenticationLeaks.get())
             writeTestText(app, "controlled", "empty-author-folders.txt", "PASS: native SAF selected three actually empty author directories; two missing subscriptions restored without entering author tags or having API credentials; spaced names normalized; API validation automatically downloaded six originals with read-back MD5; relinking preserved URIs without duplicates; explicit pause preserved")
         } finally {
+            runCatching {
+                val image = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()!!
+                writeTestEvidence(app, "controlled", "empty-author-final.png", "image/png") {
+                    image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                }
+                image.recycle()
+            }
             for (tag in tags) {
                 read { graph.background.pause(tag) }
                 val files = read { graph.library.records(tag) }.mapNotNull { it.localUri }
@@ -234,10 +242,13 @@ class FolderLayoutEndToEndTest {
         ui.onNodeWithTag("nav-settings").performClick()
         settleFeedback()
         ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("link-downloads"))
+        ui.waitUntil(10_000) { ui.onAllNodesWithText("重新关联并同步").fetchSemanticsNodes().isNotEmpty() }
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitForIdle()
         ui.onNodeWithTag("link-downloads").performClick()
         val use = device.wait(Until.findObject(By.text(Pattern.compile("(?i)(use this folder|allow access to.*)"))), 15_000)
             ?: error("Native directory picker not shown for $path")
-        assertTrue(use.isEnabled)
+        assertTrue("Native picker must select the prepared author root: $path", use.isEnabled)
         use.click()
         device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)?.click()
         wait {
