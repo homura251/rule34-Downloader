@@ -1,0 +1,11 @@
+appId: com.homura251.rule34downloader.e2e
+---
+# Android can show the second-denial button after a cold launch resets permission
+# flags. Keep exercising downloads with notifications denied in either dialog.
+- runFlow:
+    when:
+      visible:
+        id: ".*:id/permission_deny.*button"
+    commands:
+      - tapOn:
+          id: ".*:id/permission_deny.*button"

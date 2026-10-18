@@ -40,6 +40,7 @@ name: 03-pause-recovery
     id: task-filter-已暂停
 - assertVisible: "maestro_pause"
 - tapOn: "继续暂停任务"
+- runFlow: ../helpers/deny-notifications.yaml
 - tapOn:
     id: task-filter-全部
 - extendedWaitUntil:
