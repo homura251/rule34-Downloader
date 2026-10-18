@@ -292,7 +292,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
             } }
             item { SettingsSection("存储与恢复") {
                 Text("原文件保存到 Download/Rule34 Downloader/<作者>/。", style = MaterialTheme.typography.bodyMedium)
-                Text("可选择作者目录或其上层目录，支持多层子目录和旧文件名。自动识别作者后恢复订阅并同步；无法识别时可手动添加作者，校验后复用文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("选择作者目录或其上层目录，会按目录名自动恢复订阅并同步。空作者目录也会恢复；已有文件校验后复用，支持多层子目录和旧文件名。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedButton(onLinkFolder, enabled = !folder.linking, modifier = Modifier.testTag("link-downloads")) {
                     Text(if (folder.linking) "正在扫描并安排同步…" else if (state.settings.existingDownloadsTreeUri == null) "关联并自动同步" else "重新关联并同步")
                 }

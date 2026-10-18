@@ -46,8 +46,16 @@ class BackgroundRuntime(
         if (ready.isCompleted) ready = CompletableDeferred()
         try {
         repository.recoverInterruptedRuns()
-        settings.snapshot()
+        val linkedFolder = settings.snapshot().existingDownloadsTreeUri
         account.state.first { it.status != AccountStatus.LOADING }
+        if (linkedFolder != null) {
+            try { restoreFolder(linkedFolder, resyncExisting = false) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                // A stale grant remains visible in folder state. It must not prevent
+                // opening settings to reconnect it or browsing the existing library.
+            }
+        }
         updateSchedule()
         if (!account.state.value.canUseApi) repository.suspendForAuthentication()
         for (collection in repository.getCollections()) {
@@ -253,7 +261,9 @@ class BackgroundRuntime(
             throw e
         }
     }
-    override suspend fun link(uri: String): FolderLinkResult = folderLinks.withLock {
+    override suspend fun link(uri: String): FolderLinkResult = restoreFolder(uri, resyncExisting = true)
+
+    private suspend fun restoreFolder(uri: String, resyncExisting: Boolean): FolderLinkResult = folderLinks.withLock {
         mutableFolderState.value = FolderLinkState(linking = true)
         try {
             val tree = Uri.parse(uri)
@@ -266,10 +276,10 @@ class BackgroundRuntime(
             // Once the association is saved, creating subscriptions and scheduling work must survive navigation.
             val result = withContext(NonCancellable) {
                 settings.save(settings.snapshot().copy(existingDownloadsTreeUri = uri))
-                var restored = 0
-                for (addition in plan.additions) if (repository.addCollection(addition.tag, addition.sourcePostId)) restored++
-                val scheduled = resyncLinkedFolders(plan.targets)
-                FolderLinkResult(restored, scheduled, plan.paused, plan.targets.isNotEmpty() && !account.state.value.canUseApi,
+                val restored = linkedSetOf<String>()
+                for (addition in plan.additions) if (repository.addCollection(addition.tag, addition.sourcePostId)) restored += addition.tag
+                val scheduled = resyncLinkedFolders(if (resyncExisting) plan.targets else restored)
+                FolderLinkResult(restored.size, scheduled, plan.paused, plan.targets.isNotEmpty() && !account.state.value.canUseApi,
                     plan.poolDirectories, plan.unrecognizedDirectories, scan.name, scan.totalFiles, scan.identifiedFiles,
                     scan.unreadableDirectories.size, plan.unrecognizedDirectories > 0 ||
                         (plan.targets.isEmpty() && plan.paused == 0 && scan.totalFiles > 0 && plan.poolDirectories == 0))

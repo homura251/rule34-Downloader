@@ -33,13 +33,35 @@ class FolderRestorePlanTest {
         assertTrue(plan.additions.isEmpty()); assertTrue(plan.targets.isEmpty()); assertEquals(1, plan.paused)
     }
     @Test fun poolsAndUnrecognizableDirectoriesAreReportedRatherThanInventingAuthors() {
-        val plan = FolderRestorePlan.create(listOf(directory("pool_123"), directory("unknown_artist"), directory("my photos")), emptyList(), true)
+        val plan = FolderRestorePlan.create(listOf(directory("pool_123"), directory("unknown_artist"), directory("not*an_artist")), emptyList(), true)
         assertTrue(plan.additions.isEmpty()); assertTrue(plan.targets.isEmpty())
         assertEquals(1, plan.poolDirectories); assertEquals(2, plan.unrecognizedDirectories)
     }
-    @Test fun emptyDirectoriesDoNotCreateSubscriptionsAndRepeatedNamesAreDeduplicated() {
+    @Test fun emptyAuthorDirectoriesRestoreSubscriptionsAndRepeatedNamesAreDeduplicated() {
         val plan = FolderRestorePlan.create(listOf(SavedDownloadDirectory("empty", null, 0), directory("artist"), directory("artist")), emptyList(), true)
-        assertEquals(1, plan.additions.size); assertEquals(setOf("artist"), plan.targets)
+        assertEquals(2, plan.additions.size); assertEquals(setOf("empty", "artist"), plan.targets)
+        assertEquals(RestoredSubscription("empty", 0), plan.additions.first())
+    }
+    @Test fun renamedMediaDoesNotPreventRecoveryFromAnAuthorDirectoryName() {
+        val plan = FolderRestorePlan.create(listOf(SavedDownloadDirectory("artist", null, 0, 3)), emptyList(), false)
+        assertEquals(listOf(RestoredSubscription("artist", 0)), plan.additions)
+        assertEquals(setOf("artist"), plan.targets)
+        assertEquals(0, plan.unrecognizedDirectories)
+    }
+    @Test fun spacedAuthorNamesNormalizeLikeManuallyAddedTagsAndKeepPauseIntent() {
+        val dirs = listOf(SavedDownloadDirectory("artist one", null, 0), directory("artist_one"),
+            SavedDownloadDirectory("paused artist", null, 0))
+        val plan = FolderRestorePlan.create(dirs, listOf(collection("paused_artist", true)), false)
+        assertEquals(listOf(RestoredSubscription("artist_one", 42)), plan.additions)
+        assertEquals(setOf("artist_one"), plan.targets)
+        assertEquals(1, plan.paused)
+        assertEquals(0, plan.unrecognizedDirectories)
+    }
+    @Test fun emptyLibraryRootsAndMediaContainersAreNotMistakenForAuthors() {
+        val plan = FolderRestorePlan.create(listOf("Rule34 Downloader", "Download", "images", "authors", "backup")
+            .map { SavedDownloadDirectory(it, null, 0) }, emptyList(), true)
+        assertTrue(plan.additions.isEmpty()); assertTrue(plan.targets.isEmpty())
+        assertEquals(0, plan.unrecognizedDirectories)
     }
     @Test fun hashNamedMediaCanRestoreAnAuthorWithoutAPostIdInItsFilename() {
         val plan = FolderRestorePlan.create(listOf(SavedDownloadDirectory("artist", null, 3)), emptyList(), true)

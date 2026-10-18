@@ -22,8 +22,8 @@ android {
         applicationId = "com.homura251.rule34downloader"
         minSdk = 29
         targetSdk = 36
-        versionCode = 18
-        versionName = "2.0.5"
+        versionCode = 19
+        versionName = "2.0.6"
 
         testInstrumentationRunner = "com.homura251.rule34downloader.ApiAndroidJUnitRunner"
     }

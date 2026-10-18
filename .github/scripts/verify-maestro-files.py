@@ -12,7 +12,7 @@ origin = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(origin)
 evidence = Path(sys.argv[1])
 verified = []
-for artist, count in [('maestro_alpha', 4), ('maestro_pause', 3), ('maestro_restore', 3), ('maestro_retry', 3), ('maestro_process', 3), ('maestro_network', 3)]:
+for artist, count in [('maestro_alpha', 4), ('maestro_pause', 3), ('maestro_restore', 3), ('maestro_retry', 3), ('maestro_process', 3), ('maestro_empty_one', 3), ('maestro_empty_two', 3), ('maestro_network', 3)]:
     root = f'/sdcard/Download/Rule34 Downloader/{artist}'
     names = subprocess.check_output(['adb', 'shell', 'find ' + shlex.quote(root) + ' -type f'], text=True).strip().splitlines()
     assert len(names) == count, f'{artist}: expected {count} unique originals, found {len(names)}'

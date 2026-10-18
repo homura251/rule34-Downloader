@@ -47,7 +47,8 @@ class FolderLayoutEndToEndTest {
             Layout("ancestor", "", "backup/Download/Rule34 Downloader/"),
             Layout("custom", "My archive", "", "images/2025/", hashOnly = true),
             Layout("variant", "rule34_downloader", "", "videos/", hashOnly = true),
-            Layout("author", "artist", "", "images/")
+            Layout("author", "artist", "", "images/"),
+            Layout("renamed", "Rule34 Downloader", "", "images/", renamed = true)
         )
         val retained = mutableListOf<Uri>()
         val evidence = mutableListOf<String>()
@@ -58,13 +59,13 @@ class FolderLayoutEndToEndTest {
                 val selected = if (layout.key == "author") base + tag else base + layout.selected
                 val media = if (layout.key == "author") selected + "/" + layout.mediaSuffix
                     else selected.trimEnd('/') + "/" + layout.authorSuffix + tag + "/" + layout.mediaSuffix
-                val files = seed(media, hashOnly = layout.hashOnly).also { retained += it }
+                val files = seed(media, hashOnly = layout.hashOnly, renamed = layout.renamed).also { retained += it }
                 val before = origin.totalOriginals()
                 pick(selected.trimEnd('/'))
                 val result = graph.folders.state.value.result!!
                 assertEquals(layout.key, 1, result.restored)
                 assertEquals(layout.key, 3, result.filesFound)
-                assertEquals(layout.key, 3, result.identifiedFiles)
+                assertEquals(layout.key, if (layout.renamed) 0 else 3, result.identifiedFiles)
                 assertFalse(layout.key, result.manualRecovery)
                 completed(tag)
                 verify(tag, before)
@@ -75,7 +76,7 @@ class FolderLayoutEndToEndTest {
             }
 
             // Readable folders with renamed originals must be linkable without guessing an artist.
-            val manualPath = "Download/Rule34 Folder Matrix/manual/renamed archive"
+            val manualPath = "Download/Rule34 Folder Matrix/manual/unknown_artist"
             val manualFiles = seed("$manualPath/images/", renamed = true).also { retained += it }
             val before = origin.totalOriginals()
             pick(manualPath)
@@ -94,7 +95,7 @@ class FolderLayoutEndToEndTest {
             evidence += "manual: readable renamed archive accepted; UI added author; all 3 renamed files reused by actual MD5"
             read { graph.background.remove("folder_matrix_manual") }
 
-            val empty = "Download/Rule34 Folder Matrix/empty"
+            val empty = "Download/Rule34 Folder Matrix/empty/Rule34 Downloader"
             val placeholder = seed("$empty/").also { retained += it }
             placeholder.forEach { app.contentResolver.delete(it, null, null) }
             retained.removeAll(placeholder.toSet())
@@ -113,6 +114,99 @@ class FolderLayoutEndToEndTest {
                 graph.settings.save(graph.settings.snapshot().copy(existingDownloadsTreeUri = null))
             }
             retained.forEach { app.contentResolver.delete(it, null, null) }
+        }
+    }
+
+    @Test fun emptyAuthorDirectoriesRestoreWithoutTypingTagsAndSyncAfterApiVerification() {
+        wait { graph.startup.value.status == StartupStatus.READY }
+        val tags = listOf("folder_empty_one", "folder_empty_two", "folder_empty_paused")
+        val root = "Download/Rule34 Empty Author Tests/Rule34 Downloader"
+        read {
+            for (collection in graph.library.getCollections()) graph.background.remove(collection.tag)
+            graph.account.save(ApiCredentials("42", "fixture-key"))
+            graph.background.authenticationChanged()
+        }
+        ui.waitUntil(20_000) { ui.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty() }
+        try {
+            // Create real empty directories through MediaStore, then remove every file.
+            for (folder in listOf("folder_empty_one", "folder empty two/images", "folder_empty_paused")) {
+                seed("$root/$folder/").forEach { assertEquals(1, app.contentResolver.delete(it, null, null)) }
+            }
+            read {
+                graph.library.addCollection(tags.last(), 0)
+                graph.background.pause(tags.last())
+                graph.account.clear()
+                graph.background.authenticationChanged()
+            }
+            val beforeLists = origin.lists.get()
+            val beforeOriginals = origin.totalOriginals()
+            pick(root)
+            val result = graph.folders.state.value.result!!
+            assertEquals(0, result.filesFound)
+            assertEquals(0, result.identifiedFiles)
+            assertEquals(2, result.restored)
+            assertEquals(0, result.scheduled)
+            assertEquals(1, result.paused)
+            assertTrue(result.waitingForApi)
+            assertFalse(result.manualRecovery)
+            assertEquals(tags.toSet(), read { graph.library.getCollections() }.map { it.tag }.toSet())
+            ui.onAllNodesWithTag("folder-add-author").assertCountEquals(0)
+            assertEquals(beforeLists, origin.lists.get())
+            assertEquals(beforeOriginals, origin.totalOriginals())
+
+            // Simulate upgrading from a version that saved the grant but skipped the
+            // empty folders. Startup must restore them without another picker action.
+            read {
+                tags.take(2).forEach { graph.background.remove(it) }
+                graph.background.initialize()
+            }
+            assertEquals(tags.toSet(), read { graph.library.getCollections() }.map { it.tag }.toSet())
+            assertEquals(2, graph.folders.state.value.result!!.restored)
+            assertEquals(beforeLists, origin.lists.get())
+            assertEquals(beforeOriginals, origin.totalOriginals())
+
+            settleFeedback()
+            ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("api-user-id"))
+            ui.onNodeWithTag("api-user-id").performTextReplacement("42")
+            ui.onNodeWithTag("api-key").performTextReplacement("fixture-key")
+            ui.onNodeWithTag("verify-api").performScrollTo().performClick()
+            tags.take(2).forEach(::completed)
+            val retained = tags.take(2).associateWith { tag ->
+                val records = read { graph.library.records(tag) }
+                assertEquals(3, records.size)
+                for (record in records) {
+                    assertEquals(DownloadStatus.DOWNLOADED, record.status)
+                    val bytes = app.contentResolver.openInputStream(Uri.parse(record.localUri!!))!!.use { it.readBytes() }
+                    assertEquals(origin.hashes.getValue(record.postId), TestApiOrigin.md5(bytes))
+                }
+                records.map { it.localUri }
+            }
+            assertEquals(beforeOriginals + 6, origin.totalOriginals())
+            assertEquals(SyncState.PAUSED, read { graph.library.getCollection(tags.last()) }!!.syncState)
+            assertTrue(read { graph.library.records(tags.last()) }.isEmpty())
+
+            // The old spaced empty directory and the new canonical directory must not
+            // create duplicate subscriptions or restart explicitly paused authors.
+            pick(root)
+            assertEquals(0, graph.folders.state.value.result!!.restored)
+            assertFalse(graph.folders.state.value.result!!.manualRecovery)
+            tags.take(2).forEach(::completed)
+            for ((tag, uris) in retained) assertEquals(uris, read { graph.library.records(tag) }.map { it.localUri })
+            assertEquals(beforeOriginals + 6, origin.totalOriginals())
+            assertEquals(SyncState.PAUSED, read { graph.library.getCollection(tags.last()) }!!.syncState)
+            read { graph.background.initialize() }
+            assertEquals(0, graph.folders.state.value.result!!.scheduled)
+            assertEquals(beforeOriginals + 6, origin.totalOriginals())
+            assertEquals(0, origin.authenticationLeaks.get())
+            writeTestText(app, "controlled", "empty-author-folders.txt", "PASS: native SAF selected three actually empty author directories; two missing subscriptions restored without entering author tags or having API credentials; spaced names normalized; API validation automatically downloaded six originals with read-back MD5; relinking preserved URIs without duplicates; explicit pause preserved")
+        } finally {
+            for (tag in tags) {
+                read { graph.background.pause(tag) }
+                val files = read { graph.library.records(tag) }.mapNotNull { it.localUri }
+                read { graph.background.remove(tag) }
+                files.forEach { app.contentResolver.delete(Uri.parse(it), null, null) }
+            }
+            read { graph.settings.save(graph.settings.snapshot().copy(existingDownloadsTreeUri = null)) }
         }
     }
 
@@ -140,7 +234,7 @@ class FolderLayoutEndToEndTest {
         settleFeedback()
         ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("link-downloads"))
         ui.onNodeWithTag("link-downloads").performClick()
-        val use = device.wait(Until.findObject(By.text(Pattern.compile("(?i)use this folder"))), 15_000)
+        val use = device.wait(Until.findObject(By.text(Pattern.compile("(?i)(use this folder|allow access to.*)"))), 15_000)
             ?: error("Native directory picker not shown for $path")
         assertTrue(use.isEnabled)
         use.click()

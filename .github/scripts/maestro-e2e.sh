@@ -43,6 +43,9 @@ run_network_phase() {
     --test-output-dir "$evidence/$phase" --debug-output "$evidence/debug-$phase" \
     ".maestro/helpers/$phase.yaml"
 }
+# No files are seeded in these author directories: recovery must use their names.
+adb shell "mkdir -p '/sdcard/Download/Rule34 Downloader/empty_recovery_case/maestro_empty_one' '/sdcard/Download/Rule34 Downloader/empty_recovery_case/maestro empty two/images'"
+run_network_phase empty-authors
 run_network_phase network-prepare
 adb shell svc wifi disable
 adb shell svc data disable

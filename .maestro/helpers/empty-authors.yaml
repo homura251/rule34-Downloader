@@ -1,0 +1,70 @@
+appId: com.homura251.rule34downloader.e2e
+name: empty-authors
+---
+- runScript:
+    file: ../scripts/control.js
+    env:
+      CONTROL: reset=1
+- launchApp:
+    clearState: true
+    permissions:
+      all: deny
+- extendedWaitUntil:
+    visible:
+      id: api-user-id
+    timeout: 90000
+- scrollUntilVisible:
+    element: "稍后配置，浏览本地资料库"
+    direction: DOWN
+- tapOn: "稍后配置，浏览本地资料库"
+- tapOn:
+    id: nav-settings
+- scrollUntilVisible:
+    element:
+      id: link-downloads
+    direction: DOWN
+- tapOn:
+    id: link-downloads
+- tapOn: "empty_recovery_case"
+- tapOn: "(?i)(use this folder|allow access to.*)"
+- tapOn:
+    text: "(?i)allow"
+    optional: true
+- extendedWaitUntil:
+    visible: ".*恢复 2 个作者订阅.*"
+    timeout: 30000
+- assertNotVisible:
+    id: folder-add-author
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.lists == 0 && output.originals == 0}
+- stopApp
+- launchApp:
+    permissions:
+      all: deny
+- runFlow: login.yaml
+- tapOn:
+    id: nav-subscriptions
+- extendedWaitUntil:
+    visible:
+      id: artist-count-maestro_empty_one
+      text: "3 已下载 · 0 待下载"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: artist-count-maestro_empty_two
+      text: "3 已下载 · 0 待下载"
+    timeout: 60000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 6}
+- takeScreenshot: empty-authors-restored-without-entering-tags
+- stopApp
+- launchApp:
+    permissions:
+      all: deny
+- extendedWaitUntil:
+    visible:
+      id: artist-count-maestro_empty_two
+      text: "3 已下载 · 0 待下载"
+    timeout: 60000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 6}

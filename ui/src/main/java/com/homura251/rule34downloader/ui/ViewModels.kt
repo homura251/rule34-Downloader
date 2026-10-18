@@ -185,7 +185,7 @@ internal fun FolderLinkResult.description(): String = buildString {
     if (unreadableDirectories > 0) append("；$unreadableDirectories 个子目录无法读取，请单独选择这些目录重新授权")
     if (manualRecovery) append("；请手动添加作者标签后同步，将按作品信息和文件内容校验复用")
     else if (selectedDirectory != null && filesFound == 0 && restored == 0 && scheduled == 0 && paused == 0)
-        append("；目录可读取，但未找到文件，请检查所选位置或重新关联")
+        append("；目录可读取，但未发现作者目录或作品文件")
     append("。")
 }
 

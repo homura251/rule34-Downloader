@@ -12,7 +12,9 @@
 | 暂停全部、暂停任务筛选、重启保留暂停、继续任务 | Maestro `03-pause-recovery`；`ApiAppEndToEndTest` |
 | 网络限制和自动同步设置保存 | Maestro `03`；`BusinessFlowsEndToEndTest` 检查已有重试任务更新约束且保留期限、运行中的传输安全切换网络限制 |
 | 原生目录选择、取消选择、无 API 先恢复订阅、验证后自动复用 | Maestro `04-native-folder`；`FolderLinkRecoveryTest` |
-| 祖先目录、作者目录、images/videos/年份子目录、hash 文件名、改名文件、空目录 | `FolderLayoutEndToEndTest` 的 8 种实际 SAF 布局 |
+| 空作者子目录、空格目录名、无需输入标签、缺少凭据时先恢复、验证后自动下载、重启和重复关联 | Maestro `empty-authors`；`FolderLayoutEndToEndTest.emptyAuthorDirectoriesRestoreWithoutTypingTagsAndSyncAfterApiVerification`，实际零文件目录及 MD5 读回 |
+| 旧版已保存目录授权但漏掉作者，升级后启动自动补恢复；已完成订阅和显式暂停保留 | `FolderLayoutEndToEndTest` 的启动恢复断言；普通 Release APK 覆盖安装回归 |
+| 祖先目录、作者目录、images/videos/年份子目录、hash 文件名、改名文件、空下载根目录 | `FolderLayoutEndToEndTest` 的 9 种实际 SAF 布局；有作者目录名时改名文件自动恢复 |
 | 旧目录失效、取消关联、保留订阅并恢复下载 | `BusinessFlowsEndToEndTest` 和 Maestro `04` |
 | 单个原文件 403、其他文件继续、无凭据下载已发现文件 | Maestro `05-api-media-errors`；`RecoveryUiEndToEndTest` |
 | API 429、凭据失效、重新验证后恢复且完整文件不重下 | Maestro `05` |
