@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import java.util.Locale
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 
@@ -175,10 +176,18 @@ class BackgroundRuntime(
         withContext(Dispatchers.IO) { manager.cancelUniqueWork(workName(id)).result.get(10, TimeUnit.SECONDS) }
         repository.finishPause(id)
     }
-    override suspend fun remove(id: String) = command(id).withLock {
+    override suspend fun remove(id: String) = folderLinks.withLock { command(id).withLock {
         pauseLocked(id)
-        SyncControls.gate(MediaStoreDownloader.buildRelativePath(id)).withLock { repository.removeCollection(id) }
-    }
+        SyncControls.gate(MediaStoreDownloader.buildRelativePath(id)).withLock {
+            withContext(NonCancellable) {
+                // Retained directories must not reactivate an explicitly removed author.
+                settings.update { current -> if (current.existingDownloadsTreeUri == null) current else current.copy(
+                    restoredAuthorTags = current.restoredAuthorTags + id,
+                    pendingFolderRestores = current.pendingFolderRestores.filterNot { it.equals(id, true) }.toSet()) }
+                repository.removeCollection(id)
+            }
+        }
+    } }
     override suspend fun pauseAll() {
         for (collection in repository.getCollections()) if (collection.poolId == null && !collection.paused) pause(collection.tag)
     }
@@ -250,7 +259,7 @@ class BackgroundRuntime(
         mutableFolderState.value = FolderLinkState(linking = true)
         try {
             withContext(NonCancellable) {
-                settings.save(settings.snapshot().copy(existingDownloadsTreeUri = null))
+                settings.update { it.copy(existingDownloadsTreeUri = null, restoredAuthorTags = emptySet(), pendingFolderRestores = emptySet()) }
                 // Existing saved SAF URIs may still depend on a valid read grant. Keep it so
                 // disconnecting lookup does not make the already restored gallery unreadable.
                 resyncLinkedFolders(repository.getCollections().mapTo(mutableSetOf()) { it.tag }, preserveMode = true)
@@ -272,17 +281,29 @@ class BackgroundRuntime(
             val knownFolders = repository.getCollections().mapTo(mutableSetOf()) { MediaStoreDownloader.sanitizeFolderName(it.tag) }
             val scan = withContext(Dispatchers.IO) { LinkedDownloadDirectory(context.contentResolver, tree,
                 { job.ensureActive() }, knownFolders).scan() }
-            val plan = FolderRestorePlan.create(scan.directories, repository.getCollections(), scan.wholeLibrary)
+            val preferences = settings.snapshot()
+            val sameFolder = preferences.existingDownloadsTreeUri == uri
+            val history = if (sameFolder) preferences.restoredAuthorTags else emptySet()
+            val pending = if (sameFolder) preferences.pendingFolderRestores else emptySet()
+            val plan = FolderRestorePlan.create(scan.directories, repository.getCollections(), scan.wholeLibrary,
+                history + pending, if (resyncExisting) history + pending else pending)
             // Once the association is saved, creating subscriptions and scheduling work must survive navigation.
             val result = withContext(NonCancellable) {
-                settings.save(settings.snapshot().copy(existingDownloadsTreeUri = uri))
+                // Persist unfinished imports before creating records. A process restart
+                // can finish an explicit restore without reviving a later removal.
+                val requested = pending + plan.additions.map { it.tag }
+                settings.update { it.copy(existingDownloadsTreeUri = uri, restoredAuthorTags = history, pendingFolderRestores = requested) }
                 val restored = linkedSetOf<String>()
                 for (addition in plan.additions) if (repository.addCollection(addition.tag, addition.sourcePostId)) restored += addition.tag
                 val scheduled = resyncLinkedFolders(if (resyncExisting) plan.targets else restored)
+                val discovered = plan.discoveredAuthors.mapTo(hashSetOf()) { it.lowercase(Locale.ROOT) }
+                settings.update { it.copy(existingDownloadsTreeUri = uri, restoredAuthorTags = history + plan.discoveredAuthors,
+                    pendingFolderRestores = requested.filterNot { tag -> tag.lowercase(Locale.ROOT) in discovered }.toSet()) }
                 FolderLinkResult(restored.size, scheduled, plan.paused, plan.targets.isNotEmpty() && !account.state.value.canUseApi,
                     plan.poolDirectories, plan.unrecognizedDirectories, scan.name, scan.totalFiles, scan.identifiedFiles,
                     scan.unreadableDirectories.size, plan.unrecognizedDirectories > 0 ||
-                        (plan.targets.isEmpty() && plan.paused == 0 && scan.totalFiles > 0 && plan.poolDirectories == 0))
+                        (plan.targets.isEmpty() && plan.discoveredAuthors.isEmpty() && plan.paused == 0 && scan.totalFiles > 0 && plan.poolDirectories == 0),
+                    plan.removedAuthors)
             }
             mutableFolderState.value = FolderLinkState(result = result)
             result

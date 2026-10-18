@@ -13,6 +13,8 @@ data class AppSettings(
     val syncIntervalMinutes: Long = 360,
     val wifiOnly: Boolean = false,
     val existingDownloadsTreeUri: String? = null,
+    val restoredAuthorTags: Set<String> = emptySet(),
+    val pendingFolderRestores: Set<String> = emptySet(),
 )
 
 interface AccountRepository {
@@ -27,6 +29,7 @@ interface SettingsRepository {
     val state: StateFlow<AppSettings>
     suspend fun snapshot(): AppSettings
     suspend fun save(settings: AppSettings)
+    suspend fun update(transform: (AppSettings) -> AppSettings) { save(transform(snapshot())) }
 }
 
 interface CatalogGateway {
@@ -113,7 +116,7 @@ interface TaskController {
 data class FolderLinkResult(val restored: Int, val scheduled: Int, val paused: Int, val waitingForApi: Boolean,
     val poolDirectories: Int = 0, val unrecognizedDirectories: Int = 0,
     val selectedDirectory: String? = null, val filesFound: Int = 0, val identifiedFiles: Int = 0,
-    val unreadableDirectories: Int = 0, val manualRecovery: Boolean = false)
+    val unreadableDirectories: Int = 0, val manualRecovery: Boolean = false, val removedAuthors: Int = 0)
 data class FolderLinkState(val linking: Boolean = false, val result: FolderLinkResult? = null, val error: String? = null)
 interface DownloadFolderAccess {
     val state: StateFlow<FolderLinkState>

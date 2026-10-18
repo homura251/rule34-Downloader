@@ -28,8 +28,12 @@ name: 03-pause-recovery
 - assertVisible:
     id: task-sync-maestro_pause
 - stopApp
-- launchApp
-- assertVisible: "已暂停"
+- launchApp:
+    permissions:
+      all: deny
+- extendedWaitUntil:
+    visible: "已暂停"
+    timeout: 60000
 - tapOn:
     id: nav-tasks
 - tapOn:
@@ -66,7 +70,13 @@ name: 03-pause-recovery
     id: save-settings
 - assertVisible: "下载设置已保存。"
 - stopApp
-- launchApp
+- launchApp:
+    permissions:
+      all: deny
+- extendedWaitUntil:
+    visible:
+      id: nav-settings
+    timeout: 60000
 - tapOn:
     id: nav-settings
 - scrollUntilVisible:

@@ -89,7 +89,7 @@ fun SubscriptionsScreen(viewModel: SubscriptionsViewModel, account: AccountState
                     Text("你的作品资料库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text("订阅作者，持续保存原文件。", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
                     Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                        Metric("订阅", collections.size.toString())
+                        Metric("订阅", collections.size.toString(), Modifier.testTag("subscriptions-total"))
                         Metric("已下载", downloaded.toString())
                         Metric("进行中", collections.count { it.syncState.active }.toString())
                     }
@@ -117,9 +117,9 @@ fun SubscriptionsScreen(viewModel: SubscriptionsViewModel, account: AccountState
 }
 
 @Composable
-private fun Metric(label: String, value: String) {
+private fun Metric(label: String, value: String, modifier: Modifier = Modifier) {
     Column {
-        Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(value, modifier, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(label, style = MaterialTheme.typography.labelMedium)
     }
 }
@@ -292,7 +292,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
             } }
             item { SettingsSection("存储与恢复") {
                 Text("原文件保存到 Download/Rule34 Downloader/<作者>/。", style = MaterialTheme.typography.bodyMedium)
-                Text("选择作者目录或其上层目录，会按目录名自动恢复订阅并同步。空作者目录也会恢复；已有文件校验后复用，支持多层子目录和旧文件名。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("选择作者目录或其上层目录，会按目录名自动恢复订阅并同步，空目录也支持。启动会发现新增作者；已移除订阅保持移除，重新关联可恢复。已有文件校验后复用。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedButton(onLinkFolder, enabled = !folder.linking, modifier = Modifier.testTag("link-downloads")) {
                     Text(if (folder.linking) "正在扫描并安排同步…" else if (state.settings.existingDownloadsTreeUri == null) "关联并自动同步" else "重新关联并同步")
                 }

@@ -34,24 +34,43 @@ adb shell "mkdir -p '/sdcard/Download/Rule34 Downloader/'"
 adb push "$evidence/seed/maestro_restore" '/sdcard/Download/Rule34 Downloader/'
 adb install -r app/build/outputs/apk/e2e/app-e2e.apk
 maestro --version > "$evidence/maestro-version.txt"
-maestro test --format junit --output "$evidence/results.xml" \
-  --test-output-dir "$evidence" --debug-output "$evidence/debug" .maestro
-
-run_network_phase() {
-  local phase="$1"
-  maestro test --format junit --output "$evidence/$phase.xml" \
+driver_installed=false
+run_phase() {
+  local phase="$1" flow="$2"
+  local options=()
+  # API 29 has lost a ten-minute suite-wide UiAutomation connection. Give each
+  # scenario its own connection; application/assertion failures still fail CI.
+  adb shell am force-stop dev.mobile.maestro > /dev/null 2>&1 || true
+  adb shell am force-stop dev.mobile.maestro.test > /dev/null 2>&1 || true
+  if [[ "$driver_installed" == true ]]; then options+=(--no-reinstall-driver); fi
+  maestro test "${options[@]}" --format junit --output "$evidence/$phase.xml" \
     --test-output-dir "$evidence/$phase" --debug-output "$evidence/debug-$phase" \
-    ".maestro/helpers/$phase.yaml"
+    "$flow"
+  driver_installed=true
 }
+for flow in .maestro/flows/*.yaml; do
+  name="$(basename "$flow" .yaml)"
+  run_phase "main-$name" "$flow"
+done
+python3 - "$evidence" <<'PY'
+from pathlib import Path
+import sys
+import xml.etree.ElementTree as ET
+root = ET.Element('testsuites')
+for path in sorted(Path(sys.argv[1]).glob('main-*.xml')):
+    for suite in ET.parse(path).getroot().iter('testsuite'):
+        root.append(suite)
+ET.ElementTree(root).write(Path(sys.argv[1]) / 'results.xml', encoding='utf-8', xml_declaration=True)
+PY
 # No files are seeded in these author directories: recovery must use their names.
 adb shell "mkdir -p '/sdcard/Download/Rule34 Downloader/empty_recovery_case/maestro_empty_one' '/sdcard/Download/Rule34 Downloader/empty_recovery_case/maestro empty two/images'"
-run_network_phase empty-authors
-run_network_phase network-prepare
+run_phase empty-authors .maestro/helpers/empty-authors.yaml
+run_phase network-prepare .maestro/helpers/network-prepare.yaml
 adb shell svc wifi disable
 adb shell svc data disable
 adb shell dumpsys connectivity > "$evidence/offline-connectivity.txt"
-run_network_phase network-queued
+run_phase network-queued .maestro/helpers/network-queued.yaml
 adb shell svc wifi enable
 adb shell svc data enable
-run_network_phase network-resumed
+run_phase network-resumed .maestro/helpers/network-resumed.yaml
 python3 .github/scripts/verify-maestro-files.py "$evidence"

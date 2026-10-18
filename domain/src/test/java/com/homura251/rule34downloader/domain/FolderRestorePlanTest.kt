@@ -68,4 +68,33 @@ class FolderRestorePlanTest {
         assertEquals(listOf(RestoredSubscription("artist", 0)), plan.additions)
         assertEquals(setOf("artist"), plan.targets)
     }
+    @Test fun automaticDiscoveryAddsNewAuthorsWithoutRevivingRemovedSubscriptions() {
+        val dirs = listOf(directory("removed"), directory("new"), directory("kept"))
+        val plan = FolderRestorePlan.create(dirs, listOf(collection("kept")), false, setOf("removed", "kept"))
+        assertEquals(listOf(RestoredSubscription("new", 42)), plan.additions)
+        assertEquals(setOf("new", "kept"), plan.targets)
+        assertEquals(setOf("removed", "new", "kept"), plan.discoveredAuthors)
+        assertEquals(1, plan.removedAuthors)
+    }
+    @Test fun anExplicitRestoreAndAnInterruptedRestoreCanRecreatePreviouslyRemovedAuthors() {
+        val plan = FolderRestorePlan.create(listOf(directory("removed")), emptyList(), false,
+            setOf("removed"), setOf("removed"))
+        assertEquals(listOf(RestoredSubscription("removed", 42)), plan.additions)
+        assertEquals(setOf("removed"), plan.targets)
+        assertEquals(0, plan.removedAuthors)
+    }
+    @Test fun savedOriginalTagsSurviveSanitizedFolderNamesAndCaseChanges() {
+        val dirs = listOf(directory("name_a"), directory("NAME_A"))
+        val skipped = FolderRestorePlan.create(dirs, emptyList(), false, setOf("name:a"))
+        assertTrue(skipped.additions.isEmpty()); assertTrue(skipped.targets.isEmpty())
+        assertEquals(setOf("name:a"), skipped.discoveredAuthors)
+        assertEquals(1, skipped.removedAuthors)
+        val explicit = FolderRestorePlan.create(dirs, emptyList(), false, setOf("name:a"), setOf("name:a"))
+        assertEquals(listOf(RestoredSubscription("name:a", 42)), explicit.additions)
+    }
+    @Test fun newCaseVariantDirectoriesProduceOnlyOneSubscription() {
+        val plan = FolderRestorePlan.create(listOf(directory("Artist"), directory("artist")), emptyList(), false)
+        assertEquals(1, plan.additions.size)
+        assertEquals(setOf("Artist"), plan.targets)
+    }
 }

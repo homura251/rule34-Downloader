@@ -108,7 +108,8 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
             val credentials = services.account.credentials()
             mutable.update { it.copy(userId = credentials?.userId.orEmpty(), settings = settings, loaded = true) }
             services.settings.state.collect { latest ->
-                mutable.update { it.copy(settings = it.settings.copy(existingDownloadsTreeUri = latest.existingDownloadsTreeUri)) }
+                mutable.update { it.copy(settings = it.settings.copy(existingDownloadsTreeUri = latest.existingDownloadsTreeUri,
+                    restoredAuthorTags = latest.restoredAuthorTags, pendingFolderRestores = latest.pendingFolderRestores)) }
             }
         }
     }
@@ -153,8 +154,9 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
         action {
             try {
                 // Keep a folder grant obtained while this screen was open.
-                val folder = services.settings.snapshot().existingDownloadsTreeUri
-                services.settings.save(state.value.settings.copy(existingDownloadsTreeUri = folder))
+                val draft = state.value.settings
+                services.settings.update { latest -> draft.copy(existingDownloadsTreeUri = latest.existingDownloadsTreeUri,
+                    restoredAuthorTags = latest.restoredAuthorTags, pendingFolderRestores = latest.pendingFolderRestores) }
                 services.tasks.updateSchedule()
                 mutable.update { it.copy(settings = services.settings.snapshot()) }
                 notify("下载设置已保存。")
@@ -180,11 +182,12 @@ internal fun FolderLinkResult.description(): String = buildString {
     if (scheduled > 0) append("，已自动同步 $scheduled 个订阅")
     if (waitingForApi) append("；验证 API 后会自动同步")
     if (paused > 0) append("；$paused 个暂停订阅保持暂停")
+    if (removedAuthors > 0) append("；$removedAuthors 个已移除订阅保持移除，重新关联可恢复")
     if (poolDirectories > 0) append("；$poolDirectories 个 Pool 目录暂未恢复")
     if (unrecognizedDirectories > 0) append("；$unrecognizedDirectories 个目录无法识别作者")
     if (unreadableDirectories > 0) append("；$unreadableDirectories 个子目录无法读取，请单独选择这些目录重新授权")
     if (manualRecovery) append("；请手动添加作者标签后同步，将按作品信息和文件内容校验复用")
-    else if (selectedDirectory != null && filesFound == 0 && restored == 0 && scheduled == 0 && paused == 0)
+    else if (selectedDirectory != null && filesFound == 0 && restored == 0 && scheduled == 0 && paused == 0 && removedAuthors == 0)
         append("；目录可读取，但未发现作者目录或作品文件")
     append("。")
 }

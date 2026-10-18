@@ -13,6 +13,8 @@
 | 网络限制和自动同步设置保存 | Maestro `03`；`BusinessFlowsEndToEndTest` 检查已有重试任务更新约束且保留期限、运行中的传输安全切换网络限制 |
 | 原生目录选择、取消选择、无 API 先恢复订阅、验证后自动复用 | Maestro `04-native-folder`；`FolderLinkRecoveryTest` |
 | 空作者子目录、空格目录名、无需输入标签、缺少凭据时先恢复、验证后自动下载、重启和重复关联 | Maestro `empty-authors`；`FolderLayoutEndToEndTest.emptyAuthorDirectoriesRestoreWithoutTypingTagsAndSyncAfterApiVerification`，实际零文件目录及 MD5 读回 |
+| 移除作者后重启保持移除、新增空目录自动导入、明确重新关联恢复已移除作者且不重下 | Maestro `empty-authors` 的移除/重启/重新关联；设备测试核对新增目录、原 URI、九次原图传输和暂停状态 |
+| 已识别作者和待完成恢复持久化、用户取消待恢复作者、保留下载设置时不覆盖目录恢复状态 | `FolderRestorePlanTest`、`FolderLayoutEndToEndTest`；DataStore 更新在单次 `edit` 中读取并修改当前值 |
 | 旧版已保存目录授权但漏掉作者，升级后启动自动补恢复；已完成订阅和显式暂停保留 | `FolderLayoutEndToEndTest` 的启动恢复断言；普通 Release APK 覆盖安装回归 |
 | 祖先目录、作者目录、images/videos/年份子目录、hash 文件名、改名文件、空下载根目录 | `FolderLayoutEndToEndTest` 的 9 种实际 SAF 布局；有作者目录名时改名文件自动恢复 |
 | 旧目录失效、取消关联、保留订阅并恢复下载 | `BusinessFlowsEndToEndTest` 和 Maestro `04` |
@@ -36,6 +38,8 @@ bash .github/scripts/maestro-e2e.sh
 Maestro 使用 `com.homura251.rule34downloader.e2e` 独立 APK。它与发行版共用业务代码、WorkManager、Room、DataStore、MediaStore、SAF 和 Compose 界面；专用 source set 将网络接到通过 `adb reverse` 暴露的本机 HTTP 服务。该工厂不编入普通 debug/release APK，普通版本始终使用真实 API。
 
 服务提供真实可解码的 PNG/GIF/MP4，模拟 401、429、403、空响应和慢速传输，并记录原文件请求次数。测试不用真实 key，也不改写设备中的真实用户数据；运行脚本要求使用一次性模拟器。Maestro 覆盖 Android 10 / 16，instrumentation 和 3000 文件恢复覆盖 Android 15。
+
+脚本逐场景启动新的 Maestro UiAutomation 连接，避免 Android 10 上长连接死亡后污染后续场景；业务断言失败直接让 CI 失败。场景 JUnit 汇总为 `results.xml`，单场景报告也会保留。
 
 输出位于 `app/build/maestro-evidence/`、`app/build/e2e-evidence/` 和 `app/build/bulk-e2e-evidence/`，CI 在失败时也上传截图、日志和 JUnit 报告。Maestro 结束后还会从设备读回所有场景留下的原文件，检查 MD5 和重复文件数量。
 

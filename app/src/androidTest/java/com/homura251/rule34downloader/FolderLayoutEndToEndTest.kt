@@ -120,7 +120,9 @@ class FolderLayoutEndToEndTest {
     @Test fun emptyAuthorDirectoriesRestoreWithoutTypingTagsAndSyncAfterApiVerification() {
         wait { graph.startup.value.status == StartupStatus.READY }
         val tags = listOf("folder_empty_one", "folder_empty_two", "folder_empty_paused")
-        val root = "Download/Rule34 Empty Author Tests/Rule34 Downloader"
+        val newAuthor = "folder_empty_new"
+        val capturedUris = mutableSetOf<String>()
+        val root = "Download/Rule34 Empty Author Tests/${System.nanoTime()}/Rule34 Downloader"
         read {
             for (collection in graph.library.getCollections()) graph.background.remove(collection.tag)
             graph.account.save(ApiCredentials("42", "fixture-key"))
@@ -158,7 +160,8 @@ class FolderLayoutEndToEndTest {
             // Simulate upgrading from a version that saved the grant but skipped the
             // empty folders. Startup must restore them without another picker action.
             read {
-                tags.take(2).forEach { graph.background.remove(it) }
+                tags.take(2).forEach { graph.library.removeCollection(it) }
+                graph.settings.update { it.copy(restoredAuthorTags = emptySet(), pendingFolderRestores = emptySet()) }
                 graph.background.initialize()
             }
             assertEquals(tags.toSet(), read { graph.library.getCollections() }.map { it.tag }.toSet())
@@ -180,7 +183,7 @@ class FolderLayoutEndToEndTest {
                     val bytes = app.contentResolver.openInputStream(Uri.parse(record.localUri!!))!!.use { it.readBytes() }
                     assertEquals(origin.hashes.getValue(record.postId), TestApiOrigin.md5(bytes))
                 }
-                records.map { it.localUri }
+                records.map { it.localUri }.also { uris -> capturedUris += uris.filterNotNull() }
             }
             assertEquals(beforeOriginals + 6, origin.totalOriginals())
             assertEquals(SyncState.PAUSED, read { graph.library.getCollection(tags.last()) }!!.syncState)
@@ -198,8 +201,58 @@ class FolderLayoutEndToEndTest {
             read { graph.background.initialize() }
             assertEquals(0, graph.folders.state.value.result!!.scheduled)
             assertEquals(beforeOriginals + 6, origin.totalOriginals())
+            read { graph.background.remove(tags.first()); graph.background.initialize() }
+            assertNull("A removed subscription must stay removed when its linked directory remains",
+                read { graph.library.getCollection(tags.first()) })
+            assertEquals(1, graph.folders.state.value.result!!.removedAuthors)
+            assertEquals(beforeOriginals + 6, origin.totalOriginals())
+
+            // Persisted explicit restore intent can finish after a process interruption.
+            read {
+                graph.settings.update { it.copy(pendingFolderRestores = setOf(tags.first().uppercase())) }
+                graph.background.initialize()
+            }
+            completed(tags.first())
+            assertEquals(retained.getValue(tags.first()), read { graph.library.records(tags.first()) }.map { it.localUri })
+            assertTrue(read { graph.settings.snapshot() }.pendingFolderRestores.isEmpty())
+            assertEquals(beforeOriginals + 6, origin.totalOriginals())
+            // A later removal cancels unfinished restoration of that same author.
+            read {
+                graph.settings.update { it.copy(pendingFolderRestores = setOf(tags.first())) }
+                graph.background.remove(tags.first())
+                graph.background.initialize()
+            }
+            assertNull(read { graph.library.getCollection(tags.first()) })
+            assertTrue(read { graph.settings.snapshot() }.pendingFolderRestores.isEmpty())
+
+            // An actually new empty directory must still be imported on startup.
+            seed("$root/$newAuthor/").forEach { app.contentResolver.delete(it, null, null) }
+            read { graph.background.initialize() }
+            assertEquals(1, graph.folders.state.value.result!!.restored)
+            completed(newAuthor)
+            val newRecords = read { graph.library.records(newAuthor) }
+            assertEquals(3, newRecords.size)
+            for (record in newRecords) {
+                capturedUris += record.localUri!!
+                val bytes = app.contentResolver.openInputStream(Uri.parse(record.localUri))!!.use { it.readBytes() }
+                assertEquals(origin.hashes.getValue(record.postId), TestApiOrigin.md5(bytes))
+            }
+            assertNull(read { graph.library.getCollection(tags.first()) })
+            assertEquals(beforeOriginals + 9, origin.totalOriginals())
+            read { graph.background.initialize() }
+            assertEquals(0, graph.folders.state.value.result!!.scheduled)
+            assertNull(read { graph.library.getCollection(tags.first()) })
+
+            // Choosing the root explicitly is an intentional request to restore it all.
+            pick(root)
+            assertEquals(1, graph.folders.state.value.result!!.restored)
+            assertEquals(0, graph.folders.state.value.result!!.removedAuthors)
+            (tags.take(2) + newAuthor).forEach(::completed)
+            for ((tag, uris) in retained) assertEquals(uris, read { graph.library.records(tag) }.map { it.localUri })
+            assertEquals(beforeOriginals + 9, origin.totalOriginals())
+            assertEquals(SyncState.PAUSED, read { graph.library.getCollection(tags.last()) }!!.syncState)
             assertEquals(0, origin.authenticationLeaks.get())
-            writeTestText(app, "controlled", "empty-author-folders.txt", "PASS: native SAF selected three actually empty author directories; two missing subscriptions restored without entering author tags or having API credentials; spaced names normalized; API validation automatically downloaded six originals with read-back MD5; relinking preserved URIs without duplicates; explicit pause preserved")
+            writeTestText(app, "controlled", "empty-author-folders.txt", "PASS: native SAF and legacy startup recovered empty author directories without entering tags; API validation automatically downloaded six originals with read-back MD5; relinking preserved URIs and pause; removed authors stayed removed across startup; a later new empty author was automatically imported and three originals verified; explicit relinking restored the removed author with no additional original requests")
         } finally {
             runCatching {
                 val image = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()!!
@@ -208,13 +261,14 @@ class FolderLayoutEndToEndTest {
                 }
                 image.recycle()
             }
-            for (tag in tags) {
+            for (tag in tags + newAuthor) {
                 read { graph.background.pause(tag) }
                 val files = read { graph.library.records(tag) }.mapNotNull { it.localUri }
                 read { graph.background.remove(tag) }
                 files.forEach { app.contentResolver.delete(Uri.parse(it), null, null) }
             }
-            read { graph.settings.save(graph.settings.snapshot().copy(existingDownloadsTreeUri = null)) }
+            capturedUris.forEach { app.contentResolver.delete(Uri.parse(it), null, null) }
+            read { graph.settings.update { it.copy(existingDownloadsTreeUri = null, restoredAuthorTags = emptySet(), pendingFolderRestores = emptySet()) } }
         }
     }
 
@@ -237,7 +291,9 @@ class FolderLayoutEndToEndTest {
     private fun pick(path: String) {
         val root = tree(path)
         val previous = graph.folders.state.value.result
-        read { graph.settings.save(graph.settings.snapshot().copy(existingDownloadsTreeUri = root.toString())) }
+        read { graph.settings.update { it.copy(existingDownloadsTreeUri = root.toString(),
+            restoredAuthorTags = if (it.existingDownloadsTreeUri == root.toString()) it.restoredAuthorTags else emptySet(),
+            pendingFolderRestores = if (it.existingDownloadsTreeUri == root.toString()) it.pendingFolderRestores else emptySet()) } }
         wait { graph.settings.state.value.existingDownloadsTreeUri == root.toString() }
         ui.onNodeWithTag("nav-settings").performClick()
         settleFeedback()

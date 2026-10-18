@@ -74,6 +74,71 @@ name: empty-authors
     timeout: 60000
 - runScript: ../scripts/stats.js
 - assertTrue: ${output.originals == 6}
+
+# Removing an author retains the files and must survive automatic startup discovery.
+- scrollUntilVisible:
+    element:
+      id: artist-menu-maestro_empty_one
+    direction: DOWN
+    timeout: 60000
+- tapOn:
+    id: artist-menu-maestro_empty_one
+- tapOn:
+    id: remove-maestro_empty_one
+- tapOn:
+    id: confirm-remove
+- scrollUntilVisible:
+    element:
+      id: subscriptions-total
+    direction: UP
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: subscriptions-total
+      text: "1"
+    timeout: 30000
+- stopApp
+- launchApp:
+    permissions:
+      all: deny
+- extendedWaitUntil:
+    visible:
+      id: subscriptions-total
+      text: "1"
+    timeout: 60000
+- assertNotVisible:
+    id: artist-maestro_empty_one
+- tapOn:
+    id: nav-settings
+- scrollUntilVisible:
+    element:
+      id: link-downloads
+    direction: DOWN
+- tapOn:
+    id: link-downloads
+- tapOn: "(?i)(use this folder|allow access to.*)"
+- tapOn:
+    text: "(?i)allow"
+    optional: true
+- tapOn:
+    id: nav-subscriptions
+- extendedWaitUntil:
+    visible:
+      id: subscriptions-total
+      text: "2"
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: artist-maestro_empty_one
+    direction: DOWN
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: artist-count-maestro_empty_one
+      text: "3 已下载 · 0 待下载"
+    timeout: 60000
+- runScript: ../scripts/stats.js
+- assertTrue: ${output.originals == 6}
 - takeScreenshot: empty-authors-restored-without-entering-tags
 - stopApp
 - launchApp:
