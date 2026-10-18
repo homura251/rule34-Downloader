@@ -128,9 +128,9 @@ class FolderLayoutEndToEndTest {
         }
         ui.waitUntil(20_000) { ui.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty() }
         try {
-            // Create real empty directories through MediaStore, then remove every file.
+            // The regression starts with directories only, without even seeding a file.
             for (folder in listOf("folder_empty_one", "folder empty two/images", "folder_empty_paused")) {
-                seed("$root/$folder/").forEach { assertEquals(1, app.contentResolver.delete(it, null, null)) }
+                device.executeShellCommand("mkdir -p '/sdcard/$root/$folder/'")
             }
             read {
                 graph.library.addCollection(tags.last(), 0)
@@ -228,6 +228,7 @@ class FolderLayoutEndToEndTest {
     private fun tree(path: String) = DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", "primary:$path")
     private fun pick(path: String) {
         val root = tree(path)
+        val previous = graph.folders.state.value.result
         read { graph.settings.save(graph.settings.snapshot().copy(existingDownloadsTreeUri = root.toString())) }
         wait { graph.settings.state.value.existingDownloadsTreeUri == root.toString() }
         ui.onNodeWithTag("nav-settings").performClick()
@@ -241,7 +242,8 @@ class FolderLayoutEndToEndTest {
         device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)?.click()
         wait {
             app.contentResolver.persistedUriPermissions.any { it.uri == root && it.isReadPermission } &&
-                !graph.folders.state.value.linking
+                !graph.folders.state.value.linking && graph.folders.state.value.result != null &&
+                graph.folders.state.value.result !== previous
         }
         assertNull(path, graph.folders.state.value.error)
         assertNotNull(path, graph.folders.state.value.result)

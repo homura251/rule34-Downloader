@@ -30,11 +30,19 @@ name: empty-authors
 - tapOn:
     text: "(?i)allow"
     optional: true
-- extendedWaitUntil:
-    visible: ".*恢复 2 个作者订阅.*"
-    timeout: 30000
-- assertNotVisible:
-    id: folder-add-author
+- tapOn:
+    id: nav-subscriptions
+- scrollUntilVisible:
+    element:
+      id: artist-maestro_empty_one
+    direction: DOWN
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: artist-maestro_empty_two
+    direction: UP
+    timeout: 60000
+- assertVisible: "等待 API 验证"
 - runScript: ../scripts/stats.js
 - assertTrue: ${output.lists == 0 && output.originals == 0}
 - stopApp
@@ -44,10 +52,20 @@ name: empty-authors
 - runFlow: login.yaml
 - tapOn:
     id: nav-subscriptions
+- scrollUntilVisible:
+    element:
+      id: artist-maestro_empty_one
+    direction: DOWN
+    timeout: 60000
 - extendedWaitUntil:
     visible:
       id: artist-count-maestro_empty_one
       text: "3 已下载 · 0 待下载"
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: artist-maestro_empty_two
+    direction: UP
     timeout: 60000
 - extendedWaitUntil:
     visible:
@@ -61,6 +79,11 @@ name: empty-authors
 - launchApp:
     permissions:
       all: deny
+- scrollUntilVisible:
+    element:
+      id: artist-maestro_empty_two
+    direction: DOWN
+    timeout: 60000
 - extendedWaitUntil:
     visible:
       id: artist-count-maestro_empty_two
