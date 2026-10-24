@@ -36,6 +36,7 @@ class PagedPreviewTest {
             ui.onNodeWithTag("gallery-grid").performScrollToIndex(50)
             ui.waitUntil(15_000) { ui.onAllNodesWithTag("gallery-post-$tag-315").fetchSemanticsNodes().isNotEmpty() }
             ui.onNodeWithTag("gallery-post-$tag-315").performClick()
+            ui.onNodeWithText("#315 · 51/365").assertExists()
             repeat(25) { ui.onNodeWithTag("image-preview-pager").performTouchInput { swipeLeft() } }
             ui.waitUntil(15_000) { ui.onAllNodesWithText("#290", substring = true).fetchSemanticsNodes().isNotEmpty() }
             ui.onNodeWithContentDescription("关闭预览").performClick()

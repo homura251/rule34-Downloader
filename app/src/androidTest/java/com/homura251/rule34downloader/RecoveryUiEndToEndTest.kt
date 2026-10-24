@@ -7,9 +7,6 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.By
-import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import androidx.work.WorkManager
 import com.homura251.rule34downloader.domain.*
 import kotlinx.coroutines.*
@@ -61,8 +58,7 @@ class RecoveryUiEndToEndTest {
             capture("failed-file.png")
             origin.forbiddenOriginals.remove(1)
             ui.onNodeWithTag("retry-file-$tag-1").performClick()
-            UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).wait(
-                Until.findObject(By.res("com.google.android.permissioncontroller", "permission_allow_button")), 2_000)?.click()
+            allowNotificationsIfPrompted()
             wait { read { graph.library.getCollection(tag) }?.syncState == SyncState.QUEUE_COMPLETE && workFinished() }
             assertEquals(pages, origin.lists.get())
             assertEquals(transfers + 1, origin.totalOriginals())

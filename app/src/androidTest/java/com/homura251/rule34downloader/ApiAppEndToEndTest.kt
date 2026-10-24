@@ -7,9 +7,6 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.By
-import androidx.test.uiautomator.Until
-import androidx.test.uiautomator.UiDevice
 import com.homura251.rule34downloader.domain.*
 import kotlinx.coroutines.*
 import org.junit.Assert.*
@@ -37,8 +34,7 @@ class ApiAppEndToEndTest {
         ui.onNodeWithTag("add-author").performClick()
         ui.onNodeWithTag("author-input").performTextInput(origin.tag)
         ui.onNodeWithText("添加", substring = false).performClick()
-        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).wait(
-            Until.findObject(By.res("com.google.android.permissioncontroller", "permission_allow_button")), 2_000)?.click()
+        allowNotificationsIfPrompted()
         wait { read { graph.library.getCollection(origin.tag) } != null }
         assertEquals(pages, origin.lists.get())
         ui.onNodeWithTag("nav-settings").performClick()
@@ -47,8 +43,10 @@ class ApiAppEndToEndTest {
         ui.onNodeWithTag("api-key").performTextInput("fixture-key")
         ui.onNodeWithTag("verify-api").performScrollTo().performClick()
         wait { read { graph.library.records(origin.tag) }.any { it.postId == 1L && it.bytesDownloaded > 0 } }
-        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        device.pressBack(); ui.waitForIdle(); device.pressBack(); ui.waitForIdle()
+        ui.onNodeWithContentDescription("返回").performClick()
+        ui.waitForIdle()
+        ui.onNodeWithContentDescription("返回").performClick()
+        ui.waitForIdle()
         ui.onNodeWithContentDescription("${origin.tag} 更多操作").performClick()
         ui.onNodeWithTag("sync-${origin.tag}").performClick()
         wait { read { graph.library.getCollection(origin.tag) }?.syncState == SyncState.PAUSED }
@@ -57,6 +55,7 @@ class ApiAppEndToEndTest {
         ui.onNodeWithTag("nav-tasks").performClick()
         ui.onNodeWithTag("task-filter-已暂停").performClick()
         ui.onNodeWithTag("task-sync-${origin.tag}").performScrollTo().performClick()
+        allowNotificationsIfPrompted()
         wait(90_000) { read { graph.library.records(origin.tag) }.count { it.status == DownloadStatus.DOWNLOADED } == 3 }
         val saved = read { graph.library.records(origin.tag) }
         for (record in saved) {
