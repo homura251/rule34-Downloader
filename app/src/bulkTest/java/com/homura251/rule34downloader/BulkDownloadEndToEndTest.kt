@@ -187,7 +187,14 @@ class BulkDownloadEndToEndTest {
         ui.onNodeWithTag("add-author").performClick()
         ui.onNodeWithTag("author-input").performTextInput(tag)
         ui.onNodeWithText("添加", substring = false).performClick()
-        ui.onNodeWithContentDescription("返回").performClick(); waitUiTag("artist-$tag")
+        allowNotificationsIfPrompted()
+        ui.waitUntil(30_000) {
+            ui.onAllNodesWithContentDescription("返回").fetchSemanticsNodes().isNotEmpty() &&
+                ui.onAllNodesWithTag("author-input").fetchSemanticsNodes().isEmpty()
+        }
+        ui.onNodeWithContentDescription("返回").performClick()
+        ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("artist-$tag"))
+        waitUiTag("artist-$tag")
     }
     private fun syncButton(expected: String) {
         if (ui.onAllNodesWithTag("nav-subscriptions").fetchSemanticsNodes().isEmpty())

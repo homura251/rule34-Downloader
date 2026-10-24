@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.work.WorkManager
+import androidx.work.WorkInfo
 import com.homura251.rule34downloader.domain.*
 import kotlinx.coroutines.*
 import org.junit.Assert.*
@@ -45,8 +46,10 @@ class RecoveryUiEndToEndTest {
                     read { graph.library.records(tag) }.count { it.status == DownloadStatus.DOWNLOADED } == 2
             }
             val healthy = read { graph.library.records(tag) }.filter { it.postId != 1L }.associate { it.postId to it.localUri }
-            read { graph.account.clear(); graph.background.authenticationChanged() }
-            wait { workFinished() }
+            wait { retryQueued() }
+            // Leave the old delayed FULL work queued, as with an API outage.
+            // A selected file retry must replace it instead of waiting for its scan.
+            read { graph.account.clear() }
             val pages = origin.lists.get()
             val transfers = origin.totalOriginals()
             ui.onNodeWithTag("nav-tasks").performClick()
@@ -59,7 +62,7 @@ class RecoveryUiEndToEndTest {
             origin.forbiddenOriginals.remove(1)
             ui.onNodeWithTag("retry-file-$tag-1").performClick()
             allowNotificationsIfPrompted()
-            wait { read { graph.library.getCollection(tag) }?.syncState == SyncState.QUEUE_COMPLETE && workFinished() }
+            wait(15_000) { read { graph.library.getCollection(tag) }?.syncState == SyncState.QUEUE_COMPLETE && workFinished() }
             assertEquals(pages, origin.lists.get())
             assertEquals(transfers + 1, origin.totalOriginals())
             assertEquals(healthy, read { graph.library.records(tag) }.filter { it.postId != 1L }.associate { it.postId to it.localUri })
@@ -85,6 +88,10 @@ class RecoveryUiEndToEndTest {
         }
     }
 
+    private fun retryQueued(): Boolean {
+        val work = WorkManager.getInstance(app).getWorkInfosForUniqueWork("rule34-sync-$tag").get(10, TimeUnit.SECONDS)
+        return work.any { it.state == WorkInfo.State.ENQUEUED } && work.none { it.state == WorkInfo.State.RUNNING }
+    }
     private fun workFinished() = WorkManager.getInstance(app).getWorkInfosForUniqueWork("rule34-sync-$tag")
         .get(10, TimeUnit.SECONDS).all { it.state.isFinished }
     private fun wait(timeout: Long = 60_000, predicate: () -> Boolean) {

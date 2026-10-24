@@ -148,9 +148,12 @@ class BackgroundRuntime(
             val collection = repository.getCollection(id) ?: return@withLock
             if (collection.poolId != null) return@withLock
             repository.retryFiles(files)
-            // APPEND keeps a retry requested during an active run from getting lost.
-            // Work input and Room retain this mode across process death and delayed retries.
-            if (!collection.paused) enqueue(id, ExistingWorkPolicy.APPEND_OR_REPLACE, true, mode = SyncMode.KNOWN_FILES)
+            repository.setSyncMode(id, SyncMode.KNOWN_FILES)
+            // Preserve an active transfer, but replace queued/backoff discovery so a
+            // manual file retry is not delayed by an unrelated scan retry.
+            val running = collection.syncState in setOf(SyncState.DISCOVERING, SyncState.VERIFYING, SyncState.SYNCING)
+            val policy = if (running) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE
+            if (!collection.paused) enqueue(id, policy, true, mode = SyncMode.KNOWN_FILES)
         }
     }
     override suspend fun authenticationChanged() {
@@ -159,7 +162,6 @@ class BackgroundRuntime(
         withContext(Dispatchers.IO) {
             // Pre-2.0 work has the same unique name but does not carry the new group tag.
             val cancellations = collections.map { manager.cancelUniqueWork(workName(it.tag)) }
-            manager.cancelAllWorkByTag(API_SYNC_TAG).result.get(10, TimeUnit.SECONDS)
             cancellations.forEach { it.result.get(10, TimeUnit.SECONDS) }
         }
         repository.suspendForAuthentication()
@@ -237,7 +239,9 @@ class BackgroundRuntime(
     suspend fun execute(id: String, observer: SyncObserver, mode: SyncMode = SyncMode.FULL): SyncOutcome = slots.withPermit {
         ready.await()
         SyncControls.gate(MediaStoreDownloader.buildRelativePath(id)).withLock {
-                val job = currentCoroutineContext()
+            // A manual action can supersede a delayed worker without losing its queue.
+            if (repository.getCollection(id)?.syncMode != mode) return@withLock SyncOutcome.Skipped
+            val job = currentCoroutineContext()
             val control = SyncControl { job.ensureActive() }
             SyncControls.register(id, control)
             val watcher = CoroutineScope(job).launch(start = CoroutineStart.UNDISPATCHED) {
