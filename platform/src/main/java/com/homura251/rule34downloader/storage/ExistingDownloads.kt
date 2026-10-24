@@ -15,15 +15,13 @@ class ExistingDownloads(
     private val checkActive: () -> Unit,
     private val currentFolder: () -> String? = { null },
 ) {
-    data class Match(val uri: Uri, val bytes: Long, val verifiedMd5: String)
+    data class Match(val uri: Uri, val bytes: Long, val verifiedMd5: String? = null)
     data class Lookup(val match: Match?, val rejection: String? = null)
     private data class Candidate(val uri: Uri, val identity: SavedFileIdentity?)
     private val resolver = context.contentResolver
     private val byId = mutableMapOf<Long, MutableList<Candidate>>()
     private val byHash = mutableMapOf<String, MutableList<Candidate>>()
     private val seen = hashSetOf<String>()
-    private val unidentified = ArrayDeque<Candidate>()
-    private val fingerprints = mutableMapOf<String, MutableList<Candidate>>()
     private var indexedTree: String? = null
     private var ownedLoaded = false
     private var linkedLoaded = false
@@ -35,14 +33,13 @@ class ExistingDownloads(
         if (id != null) byId.getOrPut(id) { mutableListOf() } += file
         else {
             file.identity?.md5?.let { byHash.getOrPut(it) { mutableListOf() } += file }
-            unidentified.addLast(file)
         }
     }
 
     private fun loadOwned() {
         val selected = currentFolder()
         if (ownedLoaded && indexedTree != selected) {
-            byId.clear(); byHash.clear(); seen.clear(); unidentified.clear(); fingerprints.clear()
+            byId.clear(); byHash.clear(); seen.clear()
             ownedLoaded = false; linkedLoaded = false
         }
         if (ownedLoaded) return
@@ -88,46 +85,29 @@ class ExistingDownloads(
 
     fun lookup(record: DownloadRecord, checkActive: () -> Unit): Lookup {
         val expected = FileChecksum.expectedForReuse(record.md5, record.verifiedMd5, record.fileUrl)
-            ?: return Lookup(null, "帖子 #" + record.postId + " 缺少可靠 MD5，无法校验旧文件")
-        var candidateFound = false
-        fun fingerprint(uri: Uri): SavedFileIdentity.Companion.Fingerprint? {
+        fun readable(uri: Uri): Match? {
             checkActive()
-            val result = try { resolver.openInputStream(uri)?.use { SavedFileIdentity.fingerprint(it, checkActive) } }
-                catch (_: SecurityException) { null }
-                catch (_: IOException) { null }
-            checkActive()
-            return result
+            return try {
+                resolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                    val bytes = descriptor.statSize
+                    if (bytes <= 0 || (record.totalBytes > 0 && bytes != record.totalBytes)) null
+                    else Match(uri, bytes, record.verifiedMd5.takeIf { uri.toString() == record.localUri })
+                }
+            } catch (_: SecurityException) { null } catch (_: IOException) { null }
         }
-        fun verify(uri: Uri): Match? {
-            candidateFound = true
-            return fingerprint(uri)?.takeIf { it.md5 == expected }?.let { Match(uri, it.bytes, expected) }
-        }
-        // A valid recorded URI must remain usable even when an unrelated old tree grant has expired.
-        record.localUri?.let { verify(Uri.parse(it))?.let { match -> return Lookup(match) } }
+        record.localUri?.let { readable(Uri.parse(it))?.let { match -> return Lookup(match) } }
         loadOwned()
         fun indexed(): Match? {
-            for (file in byId[record.postId].orEmpty() + byHash[expected].orEmpty()) {
+            val candidates = byId[record.postId].orEmpty() + expected?.let { byHash[it] }.orEmpty()
+            for (file in candidates) {
                 checkActive()
-                verify(file.uri)?.let { return it }
+                readable(file.uri)?.let { return it }
             }
             return null
         }
         indexed()?.let { return Lookup(it) }
         loadLinked()
         indexed()?.let { return Lookup(it) }
-        for (candidate in fingerprints[expected].orEmpty()) {
-            verify(candidate.uri)?.let { return Lookup(it) }
-        }
-        // Renamed files have no reliable filename index. Read each at most once per run to
-        // build a content index, then require the same trusted checksum as all other reuse.
-        while (unidentified.isNotEmpty()) {
-            val candidate = unidentified.removeFirst()
-            val value = fingerprint(candidate.uri) ?: continue
-            fingerprints.getOrPut(value.md5) { mutableListOf() } += candidate
-            if (value.md5 == expected) return Lookup(Match(candidate.uri, value.bytes, expected))
-        }
-        return Lookup(null, if (candidateFound)
-            "帖子 #" + record.postId + " 的候选旧文件校验未通过或已无法读取"
-        else "未在已授权目录中找到与帖子 #" + record.postId + " 匹配的旧文件")
+        return Lookup(null)
     }
 }

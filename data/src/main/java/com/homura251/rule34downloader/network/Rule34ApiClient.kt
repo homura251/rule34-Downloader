@@ -78,7 +78,7 @@ class Rule34ApiClient(
     private suspend fun request(key: String, params: Map<String, String>, draft: ApiCredentials? = null,
         json: Boolean = true): List<JSONObject> {
         val credentials = draft ?: account.credentials()?.takeIf { account.state.value.canUseApi }
-            ?: throw SourceFailure(FailureKind.AUTH, "请先配置并验证 API 凭据。")
+            ?: throw SourceFailure(FailureKind.AUTH, "请在设置中填写 User ID 与 API Key。")
         limiter.acquire()
         val url = endpoint.newBuilder().addQueryParameter("page", "dapi").addQueryParameter("s", key)
             .addQueryParameter("q", "index").apply { if (json) addQueryParameter("json", "1") }
@@ -104,7 +104,7 @@ class Rule34ApiClient(
                             it.code == 403 && (it.header("Content-Type").orEmpty().contains("text/html", true) ||
                                 it.peekBody(4096).string().trimStart().let { text -> text.startsWith("<html", true) || text.startsWith("<!doctype html", true) }) ->
                                 throw SourceFailure(FailureKind.BLOCKED, "API 返回了验证网页，请稍后重试。")
-                            it.code == 401 || it.code == 403 -> throw SourceFailure(FailureKind.AUTH, "API 认证失败，请重新验证 User ID 与 API Key。")
+                            it.code == 401 || it.code == 403 -> throw SourceFailure(FailureKind.AUTH, "API 认证失败，请在设置中更新 User ID 与 API Key。")
                             it.code == 429 -> { limiter.defer(retry ?: 30_000); throw SourceFailure(FailureKind.RATE_LIMIT, "API 请求受到限流，稍后自动重试。", retry) }
                             it.code >= 500 -> throw SourceFailure(FailureKind.SERVER, "API 暂时不可用，稍后自动重试。", retry)
                             !it.isSuccessful -> throw SourceFailure(FailureKind.BAD_RESPONSE, "API 请求失败（HTTP ${it.code}）。")
@@ -145,7 +145,7 @@ class Rule34ApiClient(
     internal fun parseObjects(body: String, key: String): List<JSONObject> {
         val text = body.trim()
         if (text.contains("missing authentication", true) || text.contains("invalid api key", true))
-            throw SourceFailure(FailureKind.AUTH, "API 凭据无效，请重新验证。")
+            throw SourceFailure(FailureKind.AUTH, "API 凭据无效，请更新凭据。")
         if (text.startsWith("<!doctype html", true) || text.startsWith("<html", true))
             throw SourceFailure(FailureKind.BLOCKED, "API 返回了验证网页，请稍后重试。")
         try {

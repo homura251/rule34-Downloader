@@ -23,7 +23,7 @@ class AndroidAccountRepository(context: Context, scope: CoroutineScope) : Accoun
         val saved = store.get()
         mutable.value = when {
             saved == null -> AccountState()
-            status.getBoolean("invalid", false) -> AccountState(AccountStatus.INVALID, saved.userId, "API 凭据已失效，请重新验证。")
+            status.getBoolean("invalid", false) -> AccountState(AccountStatus.INVALID, saved.userId, "API 凭据已失效，请在设置中更新。")
             else -> AccountState(AccountStatus.READY, saved.userId)
         }
     }

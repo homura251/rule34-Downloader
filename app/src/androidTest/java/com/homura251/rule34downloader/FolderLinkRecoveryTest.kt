@@ -77,8 +77,8 @@ class FolderLinkRecoveryTest {
             val pages = origin.lists.get()
             pickRoot()
             wait { graph.folders.state.value.result?.waitingForApi == true }
-            assertEquals(0, graph.folders.state.value.result!!.scheduled)
-            assertEquals(SyncState.WAITING_AUTH, read { graph.library.getCollection("restore_waiting") }!!.syncState)
+            assertEquals(3, graph.folders.state.value.result!!.scheduled)
+            wait { read { graph.library.getCollection("restore_waiting") }?.syncState == SyncState.WAITING_AUTH }
             assertEquals(pages, origin.lists.get()); assertEquals(requests, origin.totalOriginals())
             settleFeedback()
             ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("api-user-id"))
@@ -112,7 +112,7 @@ class FolderLinkRecoveryTest {
         uri
     }
     private fun pickRoot() {
-        ui.onNodeWithTag("nav-settings").performClick()
+        if (ui.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty()) ui.onNodeWithTag("nav-settings").performClick()
         settleFeedback()
         ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("link-downloads"))
         ui.onNodeWithTag("link-downloads").performClick()

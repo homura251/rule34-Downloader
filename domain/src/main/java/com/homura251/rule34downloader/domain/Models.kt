@@ -142,3 +142,15 @@ data class GalleryPage(
     val title: String? = null,
     val poolId: Long? = null,
 )
+
+data class DownloadFileKey(val collectionId: String, val postId: Long)
+
+data class FailedDownload(
+    val key: DownloadFileKey,
+    val fileName: String,
+    val post: GalleryPost,
+    val attempts: Int,
+    val updatedAt: Long,
+)
+
+data class FailedDownloadPage(val files: List<FailedDownload>, val totalCount: Int)

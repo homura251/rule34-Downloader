@@ -49,9 +49,9 @@ class HttpMediaTransport(private val client: OkHttpClient, private val control: 
     companion object {
         fun requireResponse(response: Response) {
             when {
-                response.code == 429 -> throw SourceFailure(FailureKind.RATE_LIMIT, "原文件服务器限流，稍后自动重试。", RetryAfter.millis(response.header("Retry-After")))
-                response.code >= 500 -> throw SourceFailure(FailureKind.SERVER, "原文件服务器暂时不可用。", RetryAfter.millis(response.header("Retry-After")))
-                response.code == 403 -> throw SourceFailure(FailureKind.BLOCKED, "原文件服务器拒绝访问，可稍后手动重试。")
+                response.code == 429 -> throw SourceFailure(FailureKind.RATE_LIMIT, "原文件服务器限流（HTTP 429），稍后自动重试。", RetryAfter.millis(response.header("Retry-After")))
+                response.code >= 500 -> throw SourceFailure(FailureKind.SERVER, "原文件服务器暂时不可用（HTTP ${response.code}）。", RetryAfter.millis(response.header("Retry-After")))
+                response.code == 403 -> throw SourceFailure(FailureKind.BLOCKED, "原文件服务器拒绝访问（HTTP 403），可稍后重试。")
                 !response.isSuccessful -> throw SourceFailure(FailureKind.FILE, "原文件下载失败（HTTP ${response.code}）。")
             }
             val type = response.body?.contentType()

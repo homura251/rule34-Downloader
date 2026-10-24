@@ -33,7 +33,7 @@ class SubscriptionsViewModel(private val library: LibraryRepository, private val
 
 data class AddSubscriptionState(val input: String = "", val resolving: Boolean = false, val saving: Boolean = false,
     val sourcePostId: Long = 0, val candidates: List<Rule34Tag> = emptyList(), val selected: String? = null,
-    val error: String? = null, val added: Boolean = false)
+    val error: String? = null, val added: Boolean = false, val addedId: String? = null)
 
 class AddSubscriptionViewModel(private val services: AppServices) : ViewModel() {
     private val mutable = MutableStateFlow(AddSubscriptionState())
@@ -42,47 +42,54 @@ class AddSubscriptionViewModel(private val services: AppServices) : ViewModel() 
     fun reset() { resolveJob?.cancel(); mutable.value = AddSubscriptionState() }
     fun input(value: String) { resolveJob?.cancel(); mutable.value = AddSubscriptionState(input = value) }
     fun select(value: String) { mutable.update { it.copy(selected = value) } }
-    fun resolve() {
-        val input = state.value.input.trim()
-        if (input.isEmpty()) return
-        resolveJob?.cancel()
+    fun resolve() = submit()
+    fun subscribe() = submit()
+    fun submit() {
+        val current = state.value
+        if (current.input.isBlank() || current.resolving || current.saving) return
         mutable.update { it.copy(resolving = true, error = null) }
         resolveJob = viewModelScope.launch {
             try {
-                requireAccount()
-                val result = ResolveSubscription(services.catalog)(input)
-                mutable.update { it.copy(resolving = false, sourcePostId = result.sourcePostId, candidates = result.candidates,
-                    selected = result.candidates.singleOrNull()?.name,
-                    error = if (result.candidates.isEmpty()) "未识别到作者标签，可以直接输入作者标签。" else null) }
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { mutable.update { it.copy(resolving = false, error = e.userMessage()) } }
-        }
-    }
-    fun subscribe() {
-        val current = state.value
-        val tag = current.selected ?: return
-        if (current.saving) return
-        mutable.update { it.copy(saving = true, error = null) }
-        viewModelScope.launch {
-            try {
-                requireAccount()
-                if (!services.library.addCollection(tag, current.sourcePostId)) {
-                    mutable.update { it.copy(saving = false, error = "这个作者已经在订阅列表中。") }; return@launch
+                val result = if (current.selected != null)
+                    ResolvedSubscription(current.sourcePostId, current.candidates)
+                else ResolveSubscription(services.catalog)(current.input.trim())
+                ensureActive()
+                val tag = current.selected ?: result.candidates.singleOrNull()?.name
+                if (tag == null) {
+                    mutable.update { it.copy(resolving = false, sourcePostId = result.sourcePostId,
+                        candidates = result.candidates,
+                        error = if (result.candidates.isEmpty()) "未识别到作者，请直接输入作者标签。" else null) }
+                    return@launch
                 }
-                services.tasks.sync(tag)
-                mutable.update { it.copy(saving = false, added = true) }
+                mutable.update { it.copy(resolving = false, saving = true) }
+                withContext(NonCancellable) {
+                    val added = services.library.addCollection(tag, result.sourcePostId)
+                    if (added) services.tasks.sync(tag)
+                }
+                mutable.update { it.copy(saving = false, added = true, addedId = tag) }
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { mutable.update { it.copy(saving = false, error = e.userMessage()) } }
+            catch (e: Exception) { mutable.update { it.copy(resolving = false, saving = false, error = e.userMessage()) } }
         }
     }
-    private fun requireAccount() {
-        if (!services.account.state.value.canUseApi) throw SourceFailure(FailureKind.AUTH, "请先配置并验证 API 凭据。")
-    }
+
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class TasksViewModel(private val library: LibraryRepository, private val tasks: TaskController) : ActionViewModel() {
     val collections = library.observeCollections().catch { notify("读取任务失败，请重试。"); emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val failureAuthor = MutableStateFlow<String?>(null)
+    val selectedAuthor = failureAuthor.asStateFlow()
+    val failures = failureAuthor.flatMapLatest { author ->
+        Pager(PagingConfig(pageSize = 40, initialLoadSize = 40, enablePlaceholders = false)) {
+            FailedDownloadPagingSource(library, author, viewModelScope)
+        }.flow
+    }.cachedIn(viewModelScope)
+    fun showFailures(author: String?) { failureAuthor.value = author }
+    fun retryFile(key: DownloadFileKey) = action {
+        tasks.retryFiles(listOf(key))
+        notify(if (library.getCollection(key.collectionId)?.paused == true) "已加入重试队列，继续作者任务后开始。" else "已加入重试队列。")
+    }
     fun pauseAll() = action { tasks.pauseAll() }
     fun resumeAll() = action { tasks.resumeAll() }
     fun retryFailed() = action { tasks.retryFailed() }
@@ -93,9 +100,8 @@ class TasksViewModel(private val library: LibraryRepository, private val tasks: 
     fun pause(id: String) = action { tasks.pause(id) }
 }
 
-data class SettingsUiState(val userId: String = "", val apiKey: String = "", val validating: Boolean = false,
-    val accountError: String? = null, val settings: AppSettings = AppSettings(), val loaded: Boolean = false,
-    val saving: Boolean = false)
+data class SettingsUiState(val userId: String = "", val apiKey: String = "", val savingAccount: Boolean = false,
+    val accountError: String? = null, val settings: AppSettings = AppSettings(), val loaded: Boolean = false)
 
 class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
     private val mutable = MutableStateFlow(SettingsUiState())
@@ -114,48 +120,45 @@ class SettingsViewModel(private val services: AppServices) : ActionViewModel() {
     }
     fun userId(value: String) { mutable.update { it.copy(userId = value, accountError = null) } }
     fun apiKey(value: String) { mutable.update { it.copy(apiKey = value, accountError = null) } }
-    fun settings(value: AppSettings) { mutable.update { it.copy(settings = value) } }
-    fun verify() {
+    private val settingWrites = kotlinx.coroutines.sync.Mutex()
+    fun settings(value: AppSettings) {
+        mutable.update { it.copy(settings = value) }
+        action {
+            settingWrites.lock()
+            try {
+                val folder = services.settings.snapshot().existingDownloadsTreeUri
+                services.settings.save(value.copy(existingDownloadsTreeUri = folder))
+                services.tasks.updateSchedule()
+            } finally { settingWrites.unlock() }
+        }
+    }
+    fun saveAccount() {
         val draft = state.value
-        if (draft.validating) return
-        mutable.update { it.copy(validating = true, accountError = null) }
+        if (draft.savingAccount) return
+        mutable.update { it.copy(savingAccount = true, accountError = null) }
         viewModelScope.launch {
             try {
                 val old = services.account.credentials()
                 val userId = draft.userId.trim()
                 val key = draft.apiKey.trim().ifEmpty { old?.takeIf { it.userId == userId }?.apiKey.orEmpty() }
                 val credentials = ApiCredentials(userId, key)
-                services.catalog.validate(credentials)
+                if (userId.isBlank() || key.isBlank()) throw SourceFailure(FailureKind.AUTH, "请填写 User ID 与 API Key。")
                 ensureActive()
                 // Once committed, rebinding work must survive navigation away from this screen.
                 withContext(NonCancellable) {
                     services.account.save(credentials)
                     services.tasks.authenticationChanged()
                 }
-                mutable.update { it.copy(validating = false, apiKey = "") }
-                notify("API 验证成功，联网任务已恢复。")
+                mutable.update { it.copy(savingAccount = false, apiKey = "") }
+                notify("API 凭据已保存。")
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { mutable.update { it.copy(validating = false, accountError = e.userMessage()) } }
+            catch (e: Exception) { mutable.update { it.copy(savingAccount = false, accountError = e.userMessage()) } }
         }
     }
     fun clearAccount() = action {
         withContext(NonCancellable) { services.account.clear(); services.tasks.authenticationChanged() }
         mutable.update { it.copy(userId = "", apiKey = "", accountError = null) }
         notify("API 凭据已清除，可以继续浏览本地作品。")
-    }
-    fun saveSettings() {
-        if (state.value.saving) return
-        mutable.update { it.copy(saving = true) }
-        action {
-            try {
-                // Keep a folder grant obtained while this screen was open.
-                val folder = services.settings.snapshot().existingDownloadsTreeUri
-                services.settings.save(state.value.settings.copy(existingDownloadsTreeUri = folder))
-                services.tasks.updateSchedule()
-                mutable.update { it.copy(settings = services.settings.snapshot()) }
-                notify("下载设置已保存。")
-            } finally { mutable.update { it.copy(saving = false) } }
-        }
     }
     fun linkFolder(uri: String) = action {
         val result = services.folders.link(uri)
@@ -169,12 +172,12 @@ internal fun FolderLinkResult.description(): String = buildString {
     selectedDirectory?.let { append("：$it（找到 $filesFound 个文件，识别 $identifiedFiles 个作品文件）") }
     if (restored > 0) append("，恢复 $restored 个作者订阅")
     if (scheduled > 0) append("，已自动同步 $scheduled 个订阅")
-    if (waitingForApi) append("；验证 API 后会自动同步")
+    if (waitingForApi) append("；配置 API 后会自动同步")
     if (paused > 0) append("；$paused 个暂停订阅保持暂停")
     if (poolDirectories > 0) append("；$poolDirectories 个 Pool 目录暂未恢复")
     if (unrecognizedDirectories > 0) append("；$unrecognizedDirectories 个目录无法识别作者")
     if (unreadableDirectories > 0) append("；$unreadableDirectories 个子目录无法读取，请单独选择这些目录重新授权")
-    if (manualRecovery) append("；请手动添加作者标签后同步，将按作品信息和文件内容校验复用")
+    if (manualRecovery) append("；请手动添加作者标签后同步，将按 Post ID 或文件名匹配旧文件")
     else if (selectedDirectory != null && filesFound == 0 && restored == 0 && scheduled == 0 && paused == 0)
         append("；目录可读取，但未找到文件，请检查所选位置或重新关联")
     append("。")
@@ -189,7 +192,7 @@ class GalleryViewModel(private val library: LibraryRepository, private val saved
     private val mutableTotal = MutableStateFlow(0)
     val total = mutableTotal.asStateFlow()
     val posts = query.flatMapLatest { selected ->
-        Pager(PagingConfig(pageSize = 60, initialLoadSize = 60, prefetchDistance = 12, maxSize = 300)) {
+        Pager(PagingConfig(pageSize = 60, initialLoadSize = 60, prefetchDistance = 12, maxSize = 300, enablePlaceholders = true)) {
             LibraryPagingSource(library, selected, viewModelScope) { mutableTotal.value = it }
         }.flow
     }.cachedIn(viewModelScope)
@@ -205,11 +208,26 @@ private class LibraryPagingSource(private val library: LibraryRepository, privat
         val page = library.gallery(query, offset, params.loadSize)
         onCount(page.totalCount)
         LoadResult.Page(page.posts, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
-            if (offset + page.posts.size >= page.totalCount || page.posts.isEmpty()) null else offset + page.posts.size)
+            if (offset + page.posts.size >= page.totalCount || page.posts.isEmpty()) null else offset + page.posts.size,
+            itemsBefore = offset, itemsAfter = (page.totalCount - offset - page.posts.size).coerceAtLeast(0))
     } catch (e: CancellationException) { throw e }
     catch (e: Exception) { LoadResult.Error(e) }
     override fun getRefreshKey(state: PagingState<Int, GalleryPost>): Int? = state.anchorPosition?.let { position ->
         val page = state.closestPageToPosition(position)
         page?.prevKey?.plus(state.config.pageSize) ?: page?.nextKey?.minus(state.config.pageSize)
     }
+}
+
+private class FailedDownloadPagingSource(private val library: LibraryRepository, private val author: String?,
+    scope: CoroutineScope) : PagingSource<Int, FailedDownload>() {
+    private val watcher = scope.launch { library.changes.drop(1).collect { invalidate() } }
+    init { registerInvalidatedCallback { watcher.cancel() } }
+    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, FailedDownload> = try {
+        val offset = params.key ?: 0
+        val page = library.failedDownloads(author, offset, params.loadSize)
+        LoadResult.Page(page.files, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
+            if (offset + page.files.size >= page.totalCount || page.files.isEmpty()) null else offset + page.files.size)
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) { LoadResult.Error(e) }
+    override fun getRefreshKey(state: PagingState<Int, FailedDownload>): Int? = null
 }

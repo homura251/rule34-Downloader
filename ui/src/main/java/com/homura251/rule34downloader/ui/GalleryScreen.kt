@@ -3,7 +3,6 @@ package com.homura251.rule34downloader.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -22,34 +21,22 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +44,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.paging.compose.LazyPagingItems
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +56,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
@@ -77,7 +67,6 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.homura251.rule34downloader.domain.DownloadStatus
 import com.homura251.rule34downloader.domain.GalleryPost
-import com.homura251.rule34downloader.domain.SyncState
 import com.homura251.rule34downloader.domain.GalleryFilter
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -88,20 +77,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 
 @Composable
-fun GalleryScreen(viewModel: GalleryViewModel, allowRemote: Boolean, onSettings: () -> Unit) {
+fun GalleryScreen(viewModel: GalleryViewModel) {
     val posts = viewModel.posts.collectAsLazyPagingItems()
     val total by viewModel.total.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
-    var previewPosts by remember { mutableStateOf<List<GalleryPost>>(emptyList()) }
-    var previewIndex by remember { mutableStateOf(0) }
+    var showPreview by rememberSaveable { mutableStateOf(false) }
+    var previewIndex by rememberSaveable { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GalleryFilter.entries.forEach { value ->
                 FilterChip(selected = filter == value, onClick = { viewModel.filter(value) }, label = { Text(value.label) })
             }
         }
-        Text("$total 件作品 · ${if (allowRemote) "本地优先" else "离线浏览"}", Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.labelLarge)
-        LazyVerticalGrid(columns = GridCells.Adaptive(148.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
+        Text("$total 件作品 · 本地优先", Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.labelLarge)
+        LazyVerticalGrid(columns = GridCells.Adaptive(148.dp), modifier = Modifier.fillMaxSize().testTag("gallery-grid"), contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (posts.loadState.refresh is LoadState.Loading && posts.itemCount == 0) item(span = { GridItemSpan(maxLineSpan) }) {
                 Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -112,13 +101,15 @@ fun GalleryScreen(viewModel: GalleryViewModel, allowRemote: Boolean, onSettings:
                 EmptyState("还没有作品", "添加订阅并同步后，作品会自动出现在这里。")
             }
             items(posts.itemCount, key = posts.itemKey { "${it.artistTag}:${it.postId}" }) { index ->
-                posts[index]?.let { post ->
-                    GalleryCard(post, allowRemote) {
-                        previewPosts = posts.itemSnapshotList.items.toList()
-                        previewIndex = previewPosts.indexOfFirst { it.postId == post.postId && it.artistTag == post.artistTag }.coerceAtLeast(0)
-                    }
+                val post = posts[index]
+                if (post != null) GalleryCard(post) {
+                    previewIndex = index
+                    showPreview = true
+                } else Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(24.dp))
                 }
             }
+
             if (posts.loadState.append is LoadState.Loading) item(span = { GridItemSpan(maxLineSpan) }) {
                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
@@ -127,7 +118,9 @@ fun GalleryScreen(viewModel: GalleryViewModel, allowRemote: Boolean, onSettings:
             }
         }
     }
-    if (previewPosts.isNotEmpty()) ImagePreviewDialog(previewPosts, previewIndex, { previewPosts = emptyList() }, onSettings, allowRemote)
+    if (showPreview && posts.itemCount > 0) ImagePreviewDialog(posts.itemCount, previewIndex,
+        postAt = { index -> posts[index] }, onDismiss = { showPreview = false },
+        onRetry = posts::retry, paging = posts)
 }
 
 private val GalleryFilter.label: String get() = when (this) {
@@ -139,10 +132,10 @@ private val GalleryFilter.label: String get() = when (this) {
 }
 
 @Composable
-private fun GalleryCard(post: GalleryPost, allowRemote: Boolean, onOpen: () -> Unit) {
-    Card(onClick = onOpen) {
+private fun GalleryCard(post: GalleryPost, onOpen: () -> Unit) {
+    Card(onClick = onOpen, modifier = Modifier.testTag("gallery-post-${post.artistTag}-${post.postId}")) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceVariant)) {
-            PostImage(post, allowRemote = allowRemote, fullSize = false, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            PostImage(post, fullSize = false, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             if (post.isVideo) Icon(
                 Icons.Rounded.Videocam, "视频", Modifier.align(Alignment.BottomEnd).padding(8.dp),
                 tint = Color.White,
@@ -177,10 +170,9 @@ private fun GalleryCard(post: GalleryPost, allowRemote: Boolean, onOpen: () -> U
 }
 
 @Composable
-private fun PostImage(
+internal fun PostImage(
     post: GalleryPost,
     fullSize: Boolean,
-    allowRemote: Boolean = true,
     modifier: Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -190,7 +182,7 @@ private fun PostImage(
     var loading by remember(post.postId, fullSize) { mutableStateOf(true) }
     var error by remember(post.postId, fullSize) { mutableStateOf<String?>(null) }
     var retry by remember(post.postId, fullSize) { mutableStateOf(0) }
-    val source = post.imageSource(fullSize, skipLocal)?.takeIf { allowRemote || it.startsWith("content:") || it.startsWith("file:") }
+    val source = post.imageSource(fullSize, skipLocal)
     val request = remember(source, retry) {
         ImageRequest.Builder(context).data(source).addHeader("Referer", post.postUrl).build()
     }
@@ -232,18 +224,34 @@ private fun PostImage(
 
 @Composable
 private fun ImagePreviewDialog(
-    posts: List<GalleryPost>,
+    count: Int,
     initialPage: Int,
+    postAt: (Int) -> GalleryPost?,
     onDismiss: () -> Unit,
-    onSettings: () -> Unit,
-    allowRemote: Boolean,
+    onRetry: () -> Unit = {},
+    paging: LazyPagingItems<GalleryPost>? = null,
 ) {
     val context = LocalContext.current
-    val pager = rememberPagerState(initialPage = initialPage, pageCount = { posts.size })
+    val pager = rememberPagerState(initialPage = initialPage.coerceIn(0, (count - 1).coerceAtLeast(0)), pageCount = { count })
     var zoomed by remember { mutableStateOf(false) }
     var openError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(pager.currentPage) { zoomed = false; openError = null }
-    val currentPost = posts[pager.currentPage]
+    val currentPost = if (pager.currentPage < count) postAt(pager.currentPage) else null
+    var anchor by remember { mutableStateOf(currentPost?.let { it.artistTag to it.postId }) }
+    var previousPage by remember { mutableStateOf(pager.currentPage) }
+    LaunchedEffect(pager.currentPage, paging?.itemSnapshotList) {
+        if (pager.currentPage != previousPage) {
+            previousPage = pager.currentPage
+            currentPost?.let { anchor = it.artistTag to it.postId }
+        } else if (paging != null && anchor != null) {
+            val snapshot = paging.itemSnapshotList
+            val found = snapshot.items.indexOfFirst { it.artistTag == anchor?.first && it.postId == anchor?.second }
+            if (found >= 0) {
+                val index = snapshot.placeholdersBefore + found
+                if (index != pager.currentPage) { previousPage = index; pager.scrollToPage(index) }
+            }
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Surface(Modifier.fillMaxSize(), color = Color.Black) {
@@ -251,21 +259,25 @@ private fun ImagePreviewDialog(
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onDismiss) { Icon(Icons.Rounded.Close, "关闭预览", tint = Color.White) }
                     Text(
-                        "#${currentPost.postId} · ${pager.currentPage + 1}/${posts.size}",
+                        "${currentPost?.let { "#${it.postId}" } ?: "加载中"} · ${pager.currentPage + 1}/$count",
                         Modifier.weight(1f), color = Color.White, maxLines = 1,
                     )
-                    IconButton(onSettings) { Icon(Icons.Rounded.Settings, "网页验证", tint = Color.White) }
                     IconButton(onClick = {
-                        openError = openMedia(context, currentPost, useLocalVideo = false)
+                        openError = currentPost?.let { openMedia(context, it, useLocalVideo = false) }
                     }) { Icon(Icons.Rounded.OpenInNew, "打开原帖", tint = Color.White) }
                 }
                 HorizontalPager(
                     state = pager,
                     userScrollEnabled = !zoomed,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    modifier = Modifier.weight(1f).fillMaxWidth().testTag("image-preview-pager"),
                 ) { page ->
-                    val post = posts[page]
-                    if (post.isVideo) {
+                    val post = postAt(page)
+                    if (post == null) {
+                        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            CircularProgressIndicator()
+                            TextButton(onRetry) { Text("重新加载", color = Color.White) }
+                        }
+                    } else if (post.isVideo) {
                         Column(
                             Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
@@ -277,7 +289,7 @@ private fun ImagePreviewDialog(
                                 openError = openMedia(context, post, useLocalVideo = true)
                             }) { Text("播放已下载视频") }
                         }
-                    } else ZoomablePostImage(post, allowRemote = allowRemote, active = page == pager.currentPage) { if (page == pager.currentPage) zoomed = it }
+                    } else ZoomablePostImage(post, active = page == pager.currentPage) { if (page == pager.currentPage) zoomed = it }
                 }
                 openError?.let { Text(it, Modifier.padding(12.dp), color = Color.White) }
                 Text(
@@ -291,7 +303,7 @@ private fun ImagePreviewDialog(
 }
 
 @Composable
-private fun ZoomablePostImage(post: GalleryPost, allowRemote: Boolean, active: Boolean, onZoomChanged: (Boolean) -> Unit) {
+private fun ZoomablePostImage(post: GalleryPost, active: Boolean, onZoomChanged: (Boolean) -> Unit) {
     var scale by remember(post.postId) { mutableFloatStateOf(1f) }
     var offset by remember(post.postId) { mutableStateOf(Offset.Zero) }
     var bounds by remember { mutableStateOf(IntSize.Zero) }
@@ -314,7 +326,7 @@ private fun ZoomablePostImage(post: GalleryPost, allowRemote: Boolean, active: B
             .transformable(transform, canPan = { scale > 1f }),
     ) {
         PostImage(
-            post, allowRemote = allowRemote, fullSize = true,
+            post, fullSize = true,
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y
             },
@@ -332,4 +344,9 @@ private fun openMedia(context: Context, post: GalleryPost, useLocalVideo: Boolea
     null
 } catch (_: Exception) {
     "无法打开，请确认已安装浏览器或视频播放器。"
+}
+
+@Composable
+internal fun SinglePostPreview(post: GalleryPost, onDismiss: () -> Unit) {
+    ImagePreviewDialog(1, 0, { post }, onDismiss)
 }

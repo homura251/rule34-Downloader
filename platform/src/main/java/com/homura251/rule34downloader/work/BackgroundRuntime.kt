@@ -49,10 +49,8 @@ class BackgroundRuntime(
         settings.snapshot()
         account.state.first { it.status != AccountStatus.LOADING }
         updateSchedule()
-        if (!account.state.value.canUseApi) repository.suspendForAuthentication()
         for (collection in repository.getCollections()) {
-            if (!collection.paused && collection.poolId == null && (account.state.value.canUseApi || collection.syncMode == SyncMode.KNOWN_FILES) &&
-                (repository.queue(collection.tag).isNotEmpty() || collection.syncState in setOf(SyncState.IDLE, SyncState.WAITING_AUTH)))
+            if (!collection.paused && collection.poolId == null && (repository.queue(collection.tag).isNotEmpty() || collection.syncState in setOf(SyncState.IDLE, SyncState.WAITING_AUTH)))
                 command(collection.tag).withLock { enqueue(collection.tag, ExistingWorkPolicy.KEEP, false, mode = collection.syncMode) }
         }
         } catch (e: Exception) { ready.completeExceptionally(e); throw e }
@@ -68,7 +66,6 @@ class BackgroundRuntime(
     }
 
     private suspend fun scheduleManual(id: String, mode: SyncMode, restart: Boolean = false) {
-        if (mode == SyncMode.FULL) requireAccount()
         val collection = repository.getCollection(id) ?: return
         if (collection.poolId != null) throw SourceFailure(FailureKind.BAD_RESPONSE, "已有 Pool 目前仅支持本地查看。")
         if (collection.paused && !repository.resume(id))
@@ -81,8 +78,7 @@ class BackgroundRuntime(
                     if (!repository.restartScan(id)) throw SourceFailure(FailureKind.FILE, "任务尚未停止，请稍后重试从头扫描。")
                 }
             }
-            repository.resetFailures(id)
-            val replace = restart || mode == SyncMode.KNOWN_FILES || collection.paused || collection.syncState in setOf(
+            val replace = restart || mode != collection.syncMode || mode == SyncMode.KNOWN_FILES || collection.paused || collection.syncState in setOf(
                 SyncState.ERROR, SyncState.BLOCKED, SyncState.SCAN_INCOMPLETE, SyncState.QUEUE_COMPLETE, SyncState.COMPLETE,
                 SyncState.WAITING_AUTH, SyncState.WAITING_RETRY, SyncState.WAITING_NETWORK)
             enqueue(id, if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, true, mode = mode)
@@ -98,7 +94,7 @@ class BackgroundRuntime(
     private suspend fun enqueue(id: String, policy: ExistingWorkPolicy, userInitiated: Boolean, delayMillis: Long = 0,
         mode: SyncMode = SyncMode.FULL): Boolean {
         val collection = repository.getCollection(id) ?: return false
-        if (collection.paused || collection.poolId != null || (mode == SyncMode.FULL && !account.state.value.canUseApi)) return false
+        if (collection.paused || collection.poolId != null) return false
         if (policy == ExistingWorkPolicy.KEEP && withContext(Dispatchers.IO) {
             manager.getWorkInfosForUniqueWork(workName(id)).get(10, TimeUnit.SECONDS).any { !it.state.isFinished }
         }) return false
@@ -117,6 +113,8 @@ class BackgroundRuntime(
 
     suspend fun followUp(id: String, delayMillis: Long, mode: SyncMode = SyncMode.FULL) = command(id).withLock {
         currentCoroutineContext().ensureActive()
+        // A later manual command may already have queued a different mode.
+        if (repository.getCollection(id)?.syncMode != mode) return@withLock
         enqueue(id, ExistingWorkPolicy.APPEND_OR_REPLACE, false, delayMillis, mode)
     }
 
@@ -135,17 +133,28 @@ class BackgroundRuntime(
         for (collection in repository.getCollections()) if (collection.poolId == null && !collection.paused) pause(collection.tag)
     }
     override suspend fun resumeAll() {
-        var waitingForApi = false
-        for (collection in repository.getCollections()) if (collection.poolId == null && collection.syncState == SyncState.PAUSED) {
-            if (collection.syncMode == SyncMode.FULL && !account.state.value.canUseApi) waitingForApi = true
-            else resume(collection.tag)
-        }
-        if (waitingForApi) throw SourceFailure(FailureKind.AUTH, "已发现文件任务已继续；需要扫描的订阅请先验证 API。")
+        for (collection in repository.getCollections())
+            if (collection.poolId == null && collection.paused) resume(collection.tag)
     }
     override suspend fun retryFailed() {
-        requireAccount()
-        for (collection in repository.getCollections()) if (collection.poolId == null && !collection.paused &&
-            collection.syncState in setOf(SyncState.ERROR, SyncState.BLOCKED, SyncState.SCAN_INCOMPLETE, SyncState.WAITING_RETRY, SyncState.WAITING_NETWORK)) sync(collection.tag)
+        val keys = mutableListOf<DownloadFileKey>()
+        for (collection in repository.getCollections()) if (collection.poolId == null && !collection.paused)
+            keys += repository.records(collection.tag).filter { it.status == DownloadStatus.FAILED }
+                .map { DownloadFileKey(it.artistTag, it.postId) }
+        retryFiles(keys)
+    }
+    override suspend fun retryFiles(keys: List<DownloadFileKey>) {
+        for ((id, files) in keys.distinct().groupBy { it.collectionId }) command(id).withLock {
+            val collection = repository.getCollection(id) ?: return@withLock
+            if (collection.poolId != null) return@withLock
+            repository.retryFiles(files)
+            repository.setSyncMode(id, SyncMode.KNOWN_FILES)
+            // Preserve an active transfer, but replace queued/backoff discovery so a
+            // manual file retry is not delayed by an unrelated scan retry.
+            val running = collection.syncState in setOf(SyncState.DISCOVERING, SyncState.VERIFYING, SyncState.SYNCING)
+            val policy = if (running) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE
+            if (!collection.paused) enqueue(id, policy, true, mode = SyncMode.KNOWN_FILES)
+        }
     }
     override suspend fun authenticationChanged() {
         val collections = repository.getCollections().filter { it.syncMode == SyncMode.FULL }
@@ -153,12 +162,11 @@ class BackgroundRuntime(
         withContext(Dispatchers.IO) {
             // Pre-2.0 work has the same unique name but does not carry the new group tag.
             val cancellations = collections.map { manager.cancelUniqueWork(workName(it.tag)) }
-            manager.cancelAllWorkByTag(API_SYNC_TAG).result.get(10, TimeUnit.SECONDS)
             cancellations.forEach { it.result.get(10, TimeUnit.SECONDS) }
         }
         repository.suspendForAuthentication()
         updateSchedule()
-        if (account.state.value.canUseApi) for (collection in repository.getCollections())
+        for (collection in repository.getCollections())
             if (!collection.paused && collection.poolId == null && collection.syncMode == SyncMode.FULL)
                 command(collection.tag).withLock { enqueue(collection.tag, ExistingWorkPolicy.REPLACE, false) }
     }
@@ -176,7 +184,6 @@ class BackgroundRuntime(
         resyncLinkedFolders(repository.getCollections().filter { it.poolId == null }.mapTo(mutableSetOf()) { it.tag })
     }
     private suspend fun resyncLinkedFolders(ids: Set<String>): Int {
-        if (!account.state.value.canUseApi) { repository.suspendForAuthentication(); return 0 }
         var scheduled = 0
         for (collection in repository.getCollections()) if (collection.tag in ids && collection.poolId == null && !collection.paused) {
             command(collection.tag).withLock {
@@ -185,7 +192,6 @@ class BackgroundRuntime(
                 SyncControls.pause(collection.tag)
                 withContext(Dispatchers.IO) { manager.cancelUniqueWork(workName(collection.tag)).result.get(10, TimeUnit.SECONDS) }
                 SyncControls.gate(MediaStoreDownloader.buildRelativePath(collection.tag)).withLock {
-                    repository.resetFailures(collection.tag)
                     if (enqueue(collection.tag, ExistingWorkPolicy.REPLACE, true)) scheduled++
                 }
             }
@@ -233,7 +239,8 @@ class BackgroundRuntime(
     suspend fun execute(id: String, observer: SyncObserver, mode: SyncMode = SyncMode.FULL): SyncOutcome = slots.withPermit {
         ready.await()
         SyncControls.gate(MediaStoreDownloader.buildRelativePath(id)).withLock {
-            if (mode == SyncMode.FULL) requireAccount()
+            // A manual action can supersede a delayed worker without losing its queue.
+            if (repository.getCollection(id)?.syncMode != mode) return@withLock SyncOutcome.Skipped
             val job = currentCoroutineContext()
             val control = SyncControl { job.ensureActive() }
             SyncControls.register(id, control)
@@ -253,9 +260,6 @@ class BackgroundRuntime(
                 SyncEngine(repository, catalog, MediaStoreDownloader(context, HttpMediaTransport(http, control), control::checkActive), reuse, observer).run(id, mode = mode)
             } finally { watcher.cancel(); control.pause(); SyncControls.unregister(id, control) }
         }
-    }
-    private fun requireAccount() {
-        if (!account.state.value.canUseApi) throw SourceFailure(FailureKind.AUTH, "请先配置并验证 API 凭据。")
     }
     companion object {
         private const val SYNC_TAG = "rule34-sync"

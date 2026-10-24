@@ -138,7 +138,7 @@ class BulkDownloadEndToEndTest {
         val saved = records().associateBy { it.postId }
         for (id in 1L..5L) {
             val bytes = origin.bytes.getValue(id)
-            val damaged = when (id) { 1L, 2L -> ByteArray(bytes.size) { 23 }; 3L, 4L -> bytes.copyOf(bytes.size / 2); else -> byteArrayOf() }
+            val damaged = byteArrayOf() // Basic recovery detects empty and missing files without hashing content.
             app.contentResolver.openOutputStream(Uri.parse(saved.getValue(id).localUri!!), "wt")!!.use { it.write(damaged) }
         }
         for (id in 6L..7L) app.contentResolver.delete(Uri.parse(saved.getValue(id).localUri!!), null, null)
@@ -186,16 +186,24 @@ class BulkDownloadEndToEndTest {
         ui.onNodeWithTag("nav-subscriptions").performClick()
         ui.onNodeWithTag("add-author").performClick()
         ui.onNodeWithTag("author-input").performTextInput(tag)
-        ui.onNodeWithText("继续", substring = false).performClick()
-        waitUiText("订阅并同步"); ui.onNodeWithText("订阅并同步").performClick()
+        ui.onNodeWithText("添加", substring = false).performClick()
+        allowNotificationsIfPrompted()
+        ui.waitUntil(30_000) {
+            ui.onAllNodesWithContentDescription("返回").fetchSemanticsNodes().isNotEmpty() &&
+                ui.onAllNodesWithTag("author-input").fetchSemanticsNodes().isEmpty()
+        }
+        ui.onNodeWithContentDescription("返回").performClick()
+        ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("artist-$tag"))
         waitUiTag("artist-$tag")
     }
     private fun syncButton(expected: String) {
+        if (ui.onAllNodesWithTag("nav-subscriptions").fetchSemanticsNodes().isEmpty())
+            ui.onNodeWithContentDescription("返回").performClick()
         ui.onNodeWithTag("nav-subscriptions").performClick()
         settleFolderFeedback()
-        ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("sync-$tag"))
-        ui.waitUntil(30_000) { ui.onAllNodes(hasTestTag("sync-$tag") and hasText(expected)).fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithTag("sync-$tag").performScrollTo().performClick()
+        ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("artist-$tag"))
+        ui.onNodeWithContentDescription("$tag 更多操作").performClick()
+        ui.onNodeWithTag("sync-$tag").assertTextContains(if (expected == "同步") "更新作者" else expected).performClick()
     }
     private fun pauseThroughUi() {
         syncButton("暂停"); wait { state() == SyncState.PAUSED && workFinished() }
@@ -203,7 +211,7 @@ class BulkDownloadEndToEndTest {
     private fun resumeThroughUi() { assertEquals(SyncState.PAUSED, state()); syncButton("继续") }
     private fun pickFolder(child: Boolean) {
         val previous = read { graph.settings.snapshot() }.existingDownloadsTreeUri
-        ui.onNodeWithTag("nav-settings").performClick()
+        if (ui.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty()) ui.onNodeWithTag("nav-settings").performClick()
         waitUiTag("settings-list")
         settleFolderFeedback()
         ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("link-downloads"))
@@ -238,7 +246,7 @@ class BulkDownloadEndToEndTest {
         var total = 0L
         for (r in saved) {
             assertEquals(DownloadStatus.DOWNLOADED, r.status)
-            assertEquals(origin.hashes.getValue(r.postId), r.verifiedMd5)
+            assertNull(r.verifiedMd5)
             val digest = MessageDigest.getInstance("MD5")
             var length = 0L
             app.contentResolver.openInputStream(Uri.parse(r.localUri!!))!!.use { input ->
