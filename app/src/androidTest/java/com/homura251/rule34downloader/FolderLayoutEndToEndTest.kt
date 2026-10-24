@@ -35,6 +35,7 @@ class FolderLayoutEndToEndTest {
         val mediaSuffix: String = "", val hashOnly: Boolean = false, val renamed: Boolean = false)
 
     @Test fun nativeFolderPickerRestoresAuthorsAcrossLayoutsAndOffersManualRecovery() {
+        grantNotificationsForTest()
         wait { graph.startup.value.status == StartupStatus.READY }
         read {
             for (collection in graph.library.getCollections()) graph.background.remove(collection.tag)
@@ -88,7 +89,6 @@ class FolderLayoutEndToEndTest {
             ui.onNodeWithTag("folder-add-author").performScrollTo().assertIsEnabled().performClick()
             ui.onNodeWithTag("author-input").performTextInput("folder_matrix_manual")
             ui.onNodeWithText("添加", substring = false).performClick()
-            allowNotificationsIfPrompted()
             completed("folder_matrix_manual")
             verify("folder_matrix_manual", before + 3, expectLinked = false)
             retained += read { graph.library.records("folder_matrix_manual") }.map { Uri.parse(it.localUri!!) }

@@ -47,6 +47,7 @@ class BulkDownloadEndToEndTest {
     private fun completed() = records().count { it.status == DownloadStatus.DOWNLOADED }
 
     @Test fun genuineApiUiProcessRecoveryAndReinstallation() {
+        grantNotificationsForTest()
         waitUiTag("nav-subscriptions")
         try { when (phase) {
             "crash" -> prepareCrash()
@@ -92,7 +93,7 @@ class BulkDownloadEndToEndTest {
         assertEquals(count + 1, origin.totalOriginals())
         verifyAll(); incrementalKeepsUris()
         ui.onNodeWithTag("nav-gallery").performClick(); capture("api-paged-library.png")
-        ui.onNodeWithTag("nav-subscriptions").performClick()
+        openAuthors()
         evidence("PASS: API-only UI pause/resume; all original bytes verified; subsequent sync reused every URI")
     }
     private fun checkpointAndPause() {
@@ -183,11 +184,10 @@ class BulkDownloadEndToEndTest {
     }
 
     private fun addThroughUi() {
-        ui.onNodeWithTag("nav-subscriptions").performClick()
+        openAuthors()
         ui.onNodeWithTag("add-author").performClick()
         ui.onNodeWithTag("author-input").performTextInput(tag)
         ui.onNodeWithText("添加", substring = false).performClick()
-        allowNotificationsIfPrompted()
         ui.waitUntil(30_000) {
             ui.onAllNodesWithContentDescription("返回").fetchSemanticsNodes().isNotEmpty() &&
                 ui.onAllNodesWithTag("author-input").fetchSemanticsNodes().isEmpty()
@@ -196,10 +196,14 @@ class BulkDownloadEndToEndTest {
         ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("artist-$tag"))
         waitUiTag("artist-$tag")
     }
-    private fun syncButton(expected: String) {
+    private fun openAuthors() {
         if (ui.onAllNodesWithTag("nav-subscriptions").fetchSemanticsNodes().isEmpty())
             ui.onNodeWithContentDescription("返回").performClick()
+        waitUiTag("nav-subscriptions")
         ui.onNodeWithTag("nav-subscriptions").performClick()
+    }
+    private fun syncButton(expected: String) {
+        openAuthors()
         settleFolderFeedback()
         ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("artist-$tag"))
         ui.onNodeWithContentDescription("$tag 更多操作").performClick()
@@ -229,7 +233,7 @@ class BulkDownloadEndToEndTest {
                 !graph.folders.state.value.linking && graph.folders.state.value.result != null
         }
         capture("$phase-folder-granted.png")
-        ui.onNodeWithTag("nav-subscriptions").performClick()
+        openAuthors()
     }
     private fun settleFolderFeedback() {
         if (ui.onAllNodesWithTag("app-message").fetchSemanticsNodes().isEmpty()) return

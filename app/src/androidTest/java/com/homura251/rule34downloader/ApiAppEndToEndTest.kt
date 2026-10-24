@@ -24,6 +24,7 @@ class ApiAppEndToEndTest {
     private fun <T> read(block: suspend () -> T): T = runBlocking(Dispatchers.IO) { block() }
 
     @Test fun optionalCredentialsThreeTabsPauseResumeAndLocalLibrary() {
+        grantNotificationsForTest()
         wait { graph.startup.value.status == StartupStatus.READY }
         read {
             for (collection in graph.library.getCollections()) graph.background.remove(collection.tag)
@@ -34,7 +35,10 @@ class ApiAppEndToEndTest {
         ui.onNodeWithTag("add-author").performClick()
         ui.onNodeWithTag("author-input").performTextInput(origin.tag)
         ui.onNodeWithText("添加", substring = false).performClick()
-        allowNotificationsIfPrompted()
+        ui.waitUntil(30_000) {
+            ui.onAllNodesWithTag("author-input").fetchSemanticsNodes().isEmpty() &&
+                ui.onAllNodesWithContentDescription("返回").fetchSemanticsNodes().isNotEmpty()
+        }
         wait { read { graph.library.getCollection(origin.tag) } != null }
         assertEquals(pages, origin.lists.get())
         ui.onNodeWithTag("nav-settings").performClick()
@@ -55,7 +59,6 @@ class ApiAppEndToEndTest {
         ui.onNodeWithTag("nav-tasks").performClick()
         ui.onNodeWithTag("task-filter-已暂停").performClick()
         ui.onNodeWithTag("task-sync-${origin.tag}").performScrollTo().performClick()
-        allowNotificationsIfPrompted()
         wait(90_000) { read { graph.library.records(origin.tag) }.count { it.status == DownloadStatus.DOWNLOADED } == 3 }
         val saved = read { graph.library.records(origin.tag) }
         for (record in saved) {

@@ -16,6 +16,7 @@ class PagedPreviewTest {
     @get:Rule val ui = createAndroidComposeRule<MainActivity>()
 
     @Test fun authorPreviewLoadsPastItsFirstPageWithoutApiCredentials() = runBlocking {
+        grantNotificationsForTest()
         val app = ApplicationProvider.getApplicationContext<Rule34Application>()
         val graph = app.graph
         ui.waitUntil(30_000) { graph.startup.value.status == StartupStatus.READY }

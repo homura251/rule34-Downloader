@@ -27,6 +27,7 @@ class RecoveryUiEndToEndTest {
     private fun <T> read(block: suspend () -> T): T = runBlocking(Dispatchers.IO) { block() }
 
     @Test fun failuresIdentifyTheFileAndRetryWithoutCredentialsOrRescanning() {
+        grantNotificationsForTest()
         wait { graph.startup.value.status == StartupStatus.READY }
         read {
             graph.account.save(ApiCredentials("42", "fixture-key"))
@@ -61,7 +62,6 @@ class RecoveryUiEndToEndTest {
             capture("failed-file.png")
             origin.forbiddenOriginals.remove(1)
             ui.onNodeWithTag("retry-file-$tag-1").performClick()
-            allowNotificationsIfPrompted()
             wait(15_000) { read { graph.library.getCollection(tag) }?.syncState == SyncState.QUEUE_COMPLETE && workFinished() }
             assertEquals(pages, origin.lists.get())
             assertEquals(transfers + 1, origin.totalOriginals())

@@ -33,6 +33,7 @@ class FolderLinkRecoveryTest {
     private fun <T> read(block: suspend () -> T): T = runBlocking(Dispatchers.IO) { block() }
 
     @Test fun nativeAssociationStartsCompletedAndRestoredSubscriptionsAndDefersUntilApiVerification() {
+        grantNotificationsForTest()
         wait { graph.startup.value.status == StartupStatus.READY }
         read {
             graph.account.save(ApiCredentials("42", "fixture-key"))
