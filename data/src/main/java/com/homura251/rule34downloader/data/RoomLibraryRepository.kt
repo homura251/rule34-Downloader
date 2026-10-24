@@ -5,6 +5,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import com.homura251.rule34downloader.data.room.*
 import com.homura251.rule34downloader.domain.*
 import com.homura251.rule34downloader.domain.files.FileChecksum
+import com.homura251.rule34downloader.domain.files.DownloadFileName
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -21,7 +22,9 @@ class RoomLibraryRepository(private val database: LibraryDatabase) : SyncReposit
             COALESCE(SUM(t.status = 'FAILED'), 0) AS failed_count,
             COALESCE(MAX(CASE WHEN t.status = 'DOWNLOADING' THEN t.bytes_downloaded ELSE 0 END), 0) AS current_bytes,
             COALESCE(MAX(CASE WHEN t.status = 'DOWNLOADING' THEN t.total_bytes ELSE 0 END), 0) AS current_total,
-            (SELECT COALESCE(f.uri, p.preview_url) FROM collection_posts m JOIN posts p ON p.id = m.post_id
+            (SELECT CASE WHEN LOWER(p.file_url) GLOB '*.mp4*' OR LOWER(p.file_url) GLOB '*.webm*'
+                OR LOWER(p.file_url) GLOB '*.m4v*' OR LOWER(p.file_url) GLOB '*.mov*' THEN p.preview_url
+                ELSE COALESCE(f.uri, p.preview_url, NULLIF(p.file_url, '')) END FROM collection_posts m JOIN posts p ON p.id = m.post_id
                 LEFT JOIN local_files f ON f.collection_id = m.collection_id AND f.post_id = m.post_id
                 WHERE m.collection_id = c.id ORDER BY m.post_id DESC LIMIT 1) AS cover_url
         FROM collections c LEFT JOIN download_tasks t ON t.collection_id = c.id
@@ -40,6 +43,26 @@ class RoomLibraryRepository(private val database: LibraryDatabase) : SyncReposit
     override suspend fun addCollection(tag: String, sourcePostId: Long) =
         dao.insertCollection(CollectionEntity(tag, sourcePostId, createdAt = System.currentTimeMillis())) != -1L
     override suspend fun removeCollection(id: String) = dao.removeCollection(id)
+
+    override suspend fun failedDownloads(collectionId: String?, offset: Int, limit: Int): FailedDownloadPage {
+        val args = mutableListOf<Any>()
+        val selected = collectionId?.let { args.add(it); "AND t.collection_id = ?" }.orEmpty()
+        val from = """FROM download_tasks t JOIN posts p ON p.id = t.post_id
+            JOIN collections c ON c.id = t.collection_id
+            LEFT JOIN local_files f ON f.collection_id = t.collection_id AND f.post_id = t.post_id
+            WHERE t.status = 'FAILED' AND c.pool_id IS NULL $selected"""
+        val count = dao.count(SimpleSQLiteQuery("SELECT COUNT(*) $from", args.toTypedArray()))
+        val rows = dao.failures(SimpleSQLiteQuery("""SELECT t.collection_id, t.post_id, p.file_url, p.md5,
+            p.preview_url, f.uri AS local_uri, t.error, t.attempts, t.updated_at $from
+            ORDER BY t.updated_at DESC, t.collection_id, t.post_id DESC LIMIT ? OFFSET ?""",
+            (args + limit.coerceIn(1, 200) + offset.coerceAtLeast(0)).toTypedArray()))
+        return FailedDownloadPage(rows.map { row ->
+            FailedDownload(DownloadFileKey(row.collection_id, row.post_id),
+                DownloadFileName.build(row.post_id, row.md5, row.file_url),
+                GalleryPost(row.collection_id, row.post_id, row.file_url, row.preview_url, row.local_uri,
+                    DownloadStatus.FAILED, row.error), row.attempts, row.updated_at)
+        }, count)
+    }
 
     override suspend fun gallery(query: GalleryQuery, offset: Int, limit: Int): GalleryPage {
         val where = mutableListOf<String>()
@@ -135,7 +158,7 @@ class RoomLibraryRepository(private val database: LibraryDatabase) : SyncReposit
         dao.progress(id, postId, bytes.coerceAtLeast(0), total, System.currentTimeMillis())
     }
     override suspend fun markDownloaded(id: String, runId: String, postId: Long, file: SavedFile) = guarded(id, runId) {
-        require(file.bytes > 0 && FileChecksum.normalize(file.verifiedMd5) != null)
+        require(file.bytes > 0)
         dao.file(LocalFileEntity(id, postId, file.uri, file.bytes, file.verifiedMd5)); dao.downloaded(id, postId, file.bytes, System.currentTimeMillis())
     }
     override suspend fun invalidateFile(id: String, runId: String, postId: Long) = guarded(id, runId) {
@@ -146,8 +169,13 @@ class RoomLibraryRepository(private val database: LibraryDatabase) : SyncReposit
         dao.removeFile(id, postId)
         dao.invalidate(id, postId)
     }
-    override suspend fun markFailed(id: String, runId: String, postId: Long, error: String) = guarded(id, runId) { dao.failed(id, postId, error.take(500), System.currentTimeMillis()) }
+    override suspend fun markFailed(id: String, runId: String, postId: Long, error: String, countAttempt: Boolean) = guarded(id, runId) {
+        dao.failed(id, postId, error.take(500), System.currentTimeMillis(), if (countAttempt) 1 else 0)
+    }
     override suspend fun resetFailures(id: String) = dao.resetFailures(id)
+    override suspend fun retryFiles(keys: List<DownloadFileKey>) = database.withTransaction {
+        keys.distinct().forEach { dao.retryFile(it.collectionId, it.postId) }
+    }
     override suspend fun markQueued(id: String) = dao.markQueued(id)
     override suspend fun recoverInterruptedRuns() = database.withTransaction { dao.recoverTasks(); dao.recoverCollections() }
 

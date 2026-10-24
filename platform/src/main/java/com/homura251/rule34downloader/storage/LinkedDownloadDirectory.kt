@@ -47,7 +47,6 @@ internal class LinkedDownloadDirectory(private val resolver: ContentResolver, pr
                     ?: throw IOException("系统返回了不完整的文件名，请重新关联目录。")
                 val type = cursor.getString(2).orEmpty()
                 result += Entry(documentId, name, type == DocumentsContract.Document.MIME_TYPE_DIR, type)
-                if (result.size > MAX_ENTRIES) throw IOException("目录内容过多，请改为选择作者目录或下载资料库目录。")
             }
         }
         result
@@ -57,18 +56,18 @@ internal class LinkedDownloadDirectory(private val resolver: ContentResolver, pr
         nodeCache?.let { return it }
         val result = mutableListOf<Node>()
         val visited = hashSetOf<String>()
-        fun visit(entry: Entry, ancestors: List<Entry>) {
+        val pending = ArrayDeque<Pair<Entry, List<Entry>>>()
+        pending.add(root to emptyList())
+        while (pending.isNotEmpty()) {
             checkActive()
-            if (!visited.add(entry.id)) return
-            if (visited.size > MAX_DIRECTORIES || ancestors.size > MAX_DEPTH)
-                throw IOException("目录层级或数量过多，请改为选择更接近作者文件的目录。")
+            val (entry, ancestors) = pending.removeLast()
+            if (!visited.add(entry.id)) continue
             val items = try { children(entry.id) }
             catch (e: IOException) { if (entry.id == rootId) throw e; unreadable += entry.name; null }
             catch (e: SecurityException) { if (entry.id == rootId) throw e; unreadable += entry.name; null }
             result += Node(entry, ancestors, items)
-            items.orEmpty().filter { it.directory }.forEach { visit(it, ancestors + entry) }
+            items.orEmpty().asReversed().filter { it.directory }.forEach { pending.add(it to ancestors + entry) }
         }
-        visit(root, emptyList())
         return result.also { nodeCache = it }
     }
 
@@ -102,16 +101,17 @@ internal class LinkedDownloadDirectory(private val resolver: ContentResolver, pr
     private fun collect(id: String): List<Entry> {
         val result = mutableListOf<Entry>()
         val visited = hashSetOf<String>()
-        fun visit(folder: String, depth: Int) {
+        val pending = ArrayDeque<String>()
+        pending.add(id)
+        while (pending.isNotEmpty()) {
             checkActive()
-            if (!visited.add(folder)) return
-            if (depth > MAX_DEPTH || visited.size > MAX_DIRECTORIES)
-                throw IOException("目录层级或数量过多，请选择作者目录重新关联。")
+            val folder = pending.removeLast()
+            if (!visited.add(folder)) continue
             for (entry in children(folder)) {
-                if (entry.directory) visit(entry.id, depth + 1) else result += entry
+                checkActive()
+                if (entry.directory) pending.add(entry.id) else result += entry
             }
         }
-        visit(id, 0)
         return result.distinctBy { it.id }
     }
 
@@ -126,15 +126,12 @@ internal class LinkedDownloadDirectory(private val resolver: ContentResolver, pr
         val all = nodes()
         val matched = all.filter { it.entry.name.equals(folderName, ignoreCase = true) }
         if (matched.isNotEmpty()) return matched.flatMap { collect(it.entry.id) }.distinctBy { it.id }
-        // Renamed folders and flat archives remain eligible by post ID and content checksum.
+        // Renamed folders and flat archives remain eligible by post ID or hash in the filename.
         return all.flatMap { it.items.orEmpty() }.filterNot { it.directory }.distinctBy { it.id }
     }
 
     fun uri(entry: Entry): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, entry.id)
     companion object {
-        private const val MAX_DEPTH = 32
-        private const val MAX_DIRECTORIES = 20_000
-        private const val MAX_ENTRIES = 250_000
         private val MEDIA_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "apng", "jxl", "heic", "heif", "tif", "tiff", "mp4", "webm", "m4v", "mov", "swf")
         private fun normalized(name: String) = name.lowercase().filter(Char::isLetterOrDigit)
         private fun isAppDirectory(name: String) = normalized(name) in setOf("rule34downloader", "r34downloader")

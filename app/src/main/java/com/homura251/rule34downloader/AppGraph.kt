@@ -6,8 +6,6 @@ import com.homura251.rule34downloader.domain.*
 import com.homura251.rule34downloader.network.*
 import com.homura251.rule34downloader.work.BackgroundRuntime
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.HttpUrl
@@ -39,7 +37,6 @@ class AppGraph(context: Context, apiHttp: OkHttpClient? = null, val mediaHttp: O
     fun start() {
         if (!started.compareAndSet(false, true)) return
         retryStartup()
-        scope.launch { account.state.filter { it.status == AccountStatus.INVALID }.collectLatest { background.authenticationChanged() } }
     }
     override fun retryStartup() {
         if (!initializing.compareAndSet(false, true)) return

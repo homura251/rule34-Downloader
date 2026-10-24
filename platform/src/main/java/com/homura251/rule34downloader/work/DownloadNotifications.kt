@@ -55,7 +55,7 @@ class DownloadNotifications(
             .setSmallIcon(R.drawable.ic_download_notification)
             .setContentTitle("$artistTag 同步完成")
             .setContentText(text)
-            .setContentIntent(contentIntent())
+            .setContentIntent(contentIntent(artistTag.takeIf { failed > 0 }))
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .build()
@@ -85,13 +85,14 @@ class DownloadNotifications(
         .setCategory(NotificationCompat.CATEGORY_PROGRESS)
         .setProgress(total.coerceAtLeast(1), completed.coerceAtMost(total), total <= 0)
 
-    private fun contentIntent(): PendingIntent {
+    private fun contentIntent(failedAuthor: String? = null): PendingIntent {
         val intent = Intent().setClassName(context.packageName, "com.homura251.rule34downloader.MainActivity").apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            failedAuthor?.let { putExtra(EXTRA_FAILURE_AUTHOR, it) }
         }
         return PendingIntent.getActivity(
             context,
-            0,
+            failedAuthor?.hashCode() ?: 0,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -107,6 +108,7 @@ class DownloadNotifications(
         10_000 + (artistTag.hashCode() and 0x7fffffff) % 20_000
 
     companion object {
+        const val EXTRA_FAILURE_AUTHOR = "open_failures_author"
         const val CHANNEL_DOWNLOADS = "downloads"
 
         fun createChannels(context: Context) {

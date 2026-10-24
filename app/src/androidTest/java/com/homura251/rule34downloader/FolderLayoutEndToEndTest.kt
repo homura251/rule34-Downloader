@@ -87,11 +87,11 @@ class FolderLayoutEndToEndTest {
             settleFeedback()
             ui.onNodeWithTag("folder-add-author").performScrollTo().assertIsEnabled().performClick()
             ui.onNodeWithTag("author-input").performTextInput("folder_matrix_manual")
-            ui.onNodeWithText("继续", substring = false).performClick()
-            ui.onNodeWithText("订阅并同步").performClick()
+            ui.onNodeWithText("添加", substring = false).performClick()
             completed("folder_matrix_manual")
-            verify("folder_matrix_manual", before)
-            evidence += "manual: readable renamed archive accepted; UI added author; all 3 renamed files reused by actual MD5"
+            verify("folder_matrix_manual", before + 3, expectLinked = false)
+            retained += read { graph.library.records("folder_matrix_manual") }.map { Uri.parse(it.localUri!!) }
+            evidence += "manual: readable renamed archive accepted; UI added author; unrecognized renamed files retained; three new originals downloaded"
             read { graph.background.remove("folder_matrix_manual") }
 
             val empty = "Download/Rule34 Folder Matrix/empty"
@@ -136,7 +136,7 @@ class FolderLayoutEndToEndTest {
         val root = tree(path)
         read { graph.settings.save(graph.settings.snapshot().copy(existingDownloadsTreeUri = root.toString())) }
         wait { graph.settings.state.value.existingDownloadsTreeUri == root.toString() }
-        ui.onNodeWithTag("nav-settings").performClick()
+        if (ui.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty()) ui.onNodeWithTag("nav-settings").performClick()
         settleFeedback()
         ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("link-downloads"))
         ui.onNodeWithTag("link-downloads").performClick()
@@ -156,10 +156,11 @@ class FolderLayoutEndToEndTest {
         read { graph.library.getCollection(tag) }?.syncState == SyncState.COMPLETE &&
             WorkManager.getInstance(app).getWorkInfosForUniqueWork("rule34-sync-$tag").get(10, TimeUnit.SECONDS).all { it.state.isFinished }
     }
-    private fun verify(tag: String, before: Int) {
+    private fun verify(tag: String, before: Int, expectLinked: Boolean = true) {
         val records = read { graph.library.records(tag) }
         assertEquals(3, records.size)
-        assertTrue(records.all { it.status == DownloadStatus.DOWNLOADED && it.localUri!!.contains("externalstorage.documents") })
+        assertTrue(records.all { it.status == DownloadStatus.DOWNLOADED })
+        if (expectLinked) assertTrue(records.all { it.localUri!!.contains("externalstorage.documents") })
         for (record in records) {
             val bytes = app.contentResolver.openInputStream(Uri.parse(record.localUri!!))!!.use { it.readBytes() }
             assertEquals(origin.hashes.getValue(record.postId), TestApiOrigin.md5(bytes))

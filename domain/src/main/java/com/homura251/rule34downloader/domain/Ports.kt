@@ -48,6 +48,7 @@ interface LibraryRepository {
     suspend fun addCollection(tag: String, sourcePostId: Long): Boolean
     suspend fun removeCollection(id: String)
     suspend fun gallery(query: GalleryQuery, offset: Int, limit: Int): GalleryPage
+    suspend fun failedDownloads(collectionId: String?, offset: Int, limit: Int): FailedDownloadPage
 }
 
 data class ScanCheckpoint(val lowerWatermark: Long, val beforeId: Long? = null, val maxSeenId: Long = lowerWatermark)
@@ -75,13 +76,14 @@ interface SyncRepository : LibraryRepository {
     suspend fun progress(id: String, runId: String, postId: Long, bytes: Long, total: Long)
     suspend fun markDownloaded(id: String, runId: String, postId: Long, file: SavedFile)
     suspend fun invalidateFile(id: String, runId: String, postId: Long)
-    suspend fun markFailed(id: String, runId: String, postId: Long, error: String)
+    suspend fun markFailed(id: String, runId: String, postId: Long, error: String, countAttempt: Boolean = true)
     suspend fun resetFailures(id: String)
+    suspend fun retryFiles(keys: List<DownloadFileKey>)
     suspend fun markQueued(id: String)
     suspend fun recoverInterruptedRuns()
 }
 
-data class SavedFile(val uri: String, val bytes: Long, val verifiedMd5: String)
+data class SavedFile(val uri: String, val bytes: Long, val verifiedMd5: String? = null)
 data class ReuseResult(val file: SavedFile? = null, val rejection: String? = null)
 
 interface FileReuse {
@@ -105,6 +107,7 @@ interface TaskController {
     suspend fun pauseAll()
     suspend fun resumeAll()
     suspend fun retryFailed()
+    suspend fun retryFiles(keys: List<DownloadFileKey>)
     suspend fun authenticationChanged()
     suspend fun updateSchedule()
     suspend fun folderChanged()

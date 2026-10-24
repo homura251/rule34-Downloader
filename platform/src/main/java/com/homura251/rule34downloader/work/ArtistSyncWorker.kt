@@ -25,13 +25,13 @@ class ArtistSyncWorker(context: Context, parameters: WorkerParameters, private v
             return when (val outcome = runtime.execute(id, SyncObserver { done, total, post -> notifications.updateProgress(id, done, total, post) }, mode)) {
                 is SyncOutcome.Retry -> { runtime.followUp(id, outcome.delayMillis, outcome.mode); Result.success() }
                 is SyncOutcome.Complete -> { notifications.showFinished(id, outcome.downloaded, outcome.failed); Result.success() }
-                SyncOutcome.NeedsAuthentication -> { runtime.repository.suspendForAuthentication(); Result.success() }
+                SyncOutcome.NeedsAuthentication -> Result.success()
                 SyncOutcome.Skipped -> Result.success()
                 SyncOutcome.Blocked -> Result.failure()
             }
         } catch (e: CancellationException) { throw e }
         catch (e: SourceFailure) {
-            if (e.kind == FailureKind.AUTH) { runtime.repository.suspendForAuthentication(); return Result.success() }
+            if (e.kind == FailureKind.AUTH) return Result.success()
             return Result.failure()
         } finally { notifications.cancel(id) }
     }

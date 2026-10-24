@@ -25,7 +25,7 @@ class MediaStoreDownloader(
     private val transport: MediaTransport,
     private val checkActive: () -> Unit = {},
 ) : MediaDownloader {
-    data class Result(val uri: Uri, val bytesWritten: Long, val existed: Boolean, val verifiedMd5: String)
+    data class Result(val uri: Uri, val bytesWritten: Long, val existed: Boolean, val verifiedMd5: String? = null)
 
     override suspend fun download(record: DownloadRecord, onHeaders: (Long) -> Unit, onProgress: (Long, Long) -> Unit,
         onPublished: suspend (SavedFile) -> Unit): SavedFile = withContext(Dispatchers.IO) {
@@ -36,9 +36,7 @@ class MediaStoreDownloader(
     private suspend fun downloadBlocking(record: DownloadRecord, source: MediaStream, onHeaders: (Long) -> Unit, onProgress: (Long, Long) -> Unit,
         onPublished: suspend (SavedFile) -> Unit): Result {
         checkActive()
-        val expectedMd5 = FileChecksum.expectedForReuse(record.md5, record.verifiedMd5, record.fileUrl)
-            ?: throw FileIntegrityException("帖子 #${record.postId} 的原文件缺少可靠 MD5，无法确认完整性。")
-        val extension = extensionFromUrl(record.fileUrl)
+        val extension = DownloadFileName.extension(record.fileUrl)
         var insertedUri: Uri? = null
         var published = false
         try {
@@ -49,7 +47,7 @@ class MediaStoreDownloader(
                 val mimeType = source.contentType?.substringBefore(';')?.takeIf { it.contains('/') }
                     ?: mimeTypeForExtension(extension)
                 val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, buildFileName(record.postId, expectedMd5, extension))
+                    put(MediaStore.Downloads.DISPLAY_NAME, DownloadFileName.build(record.postId, record.md5, record.fileUrl))
                     put(MediaStore.Downloads.MIME_TYPE, mimeType)
                     put(MediaStore.Downloads.RELATIVE_PATH, buildRelativePath(record.artistTag))
                     put(MediaStore.Downloads.IS_PENDING, 1)
@@ -58,15 +56,10 @@ class MediaStoreDownloader(
                     ?: throw IOException("无法在系统 Download 集合中创建文件。")
                 insertedUri = targetUri
                 val transfer = context.contentResolver.openOutputStream(targetUri, "w")?.use { output ->
-                    VerifiedTransfer.copy(source.input, output, expectedMd5, totalBytes, ::checkDownloadActive) {
+                    VerifiedTransfer.copy(source.input, output, expectedLength = totalBytes, checkActive = ::checkDownloadActive) {
                         onProgress(it, totalBytes.coerceAtLeast(0))
                     }
                 } ?: throw IOException("无法打开目标文件。")
-                // Check the bytes actually stored, not just those read from HTTP.
-                val savedBytes = context.contentResolver.openInputStream(targetUri)?.use {
-                    SavedFileIdentity.verify(it, expectedMd5, ::checkDownloadActive)
-                }
-                if (savedBytes != transfer.bytes) throw FileIntegrityException("写入后的文件校验失败，未保存。")
                 checkDownloadActive()
                 withContext(NonCancellable) {
                     val changed = context.contentResolver.update(targetUri,
@@ -109,19 +102,6 @@ class MediaStoreDownloader(
                 }
             }
         }
-    }
-
-    private fun extensionFromUrl(url: String): String {
-        val candidate = runCatching {
-            URI(url).path.substringAfterLast('.', "").lowercase()
-        }.getOrDefault("")
-        return candidate.takeIf { it.matches(Regex("^[a-z0-9]{2,5}$")) } ?: "bin"
-    }
-
-    private fun buildFileName(postId: Long, md5: String, extension: String): String {
-        val safeMd5 = md5.lowercase().filter { it in 'a'..'f' || it in '0'..'9' }.take(32)
-        val stem = if (safeMd5.isNotEmpty()) "${postId}_$safeMd5" else postId.toString()
-        return "$stem.$extension"
     }
 
     private fun mimeTypeForExtension(extension: String): String =
