@@ -32,7 +32,12 @@ class PagedPreviewTest {
         graph.account.clear()
         try {
             ui.waitUntil(15_000) { ui.onAllNodesWithTag("artist-$tag").fetchSemanticsNodes().isNotEmpty() }
-            ui.onNodeWithTag("artist-$tag").performClick()
+            ui.mainClock.autoAdvance = false
+            ui.onNodeWithTag("artist-$tag").performTouchInput { click() }
+            ui.mainClock.advanceTimeBy(160)
+            ui.onNodeWithTag("subscriptions-list").assertDoesNotExist()
+            ui.onNodeWithTag("gallery-grid").assertIsDisplayed()
+            ui.mainClock.autoAdvance = true
             ui.waitUntil(15_000) { ui.onAllNodesWithText("365 件作品", substring = true).fetchSemanticsNodes().isNotEmpty() }
             ui.onNodeWithTag("gallery-grid").performScrollToIndex(50)
             ui.waitUntil(15_000) { ui.onAllNodesWithTag("gallery-post-$tag-315").fetchSemanticsNodes().isNotEmpty() }

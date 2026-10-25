@@ -5,6 +5,9 @@ import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -21,6 +24,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.compose.*
+import androidx.navigation.createGraph
 import com.homura251.rule34downloader.domain.*
 
 private data class Destination(val route: String, val label: String, val icon: ImageVector)
@@ -42,6 +46,7 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
         return
     }
     val account by services.account.state.collectAsStateWithLifecycle()
+    val requestNotifications by rememberUpdatedState(onRequestNotificationPermission)
     if (startup.status == StartupStatus.LOADING || account.status == AccountStatus.LOADING) {
         Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }
         return
@@ -77,6 +82,44 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
             launchSingleTop = true; restoreState = true
         }
     }
+    // Keep the graph outside Scaffold's subcomposition: hiding navigation chrome
+    // must not replace the graph while opening the first author.
+    val graph = remember(navigation, services) {
+        navigation.createGraph(startDestination = start) {
+            composable("subscriptions") {
+                val model: SubscriptionsViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { SubscriptionsViewModel(services.library, services.tasks) } } })
+                SubscriptionsScreen(model, snackbar, { id -> navigation.navigate("collection/${Uri.encode(id)}") },
+                    { add.reset(); showAdd = true }, requestNotifications, onFailures = { id -> navigation.navigate("tasks/${Uri.encode(id)}") })
+            }
+            composable("gallery") {
+                val model: GalleryViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { GalleryViewModel(services.library, createSavedStateHandle()) } } })
+                GalleryScreen(model)
+            }
+            composable("collection/{id}") { destination ->
+                val id = destination.arguments?.getString("id")
+                val model: GalleryViewModel = viewModel(factory = remember(services, id) { viewModelFactory { initializer { GalleryViewModel(services.library, createSavedStateHandle(), id) } } })
+                GalleryScreen(model)
+            }
+            composable("tasks") {
+                val model: TasksViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { TasksViewModel(services.library, services.tasks) } } })
+                TasksScreen(model, snackbar, requestNotifications, ::openSettings)
+            }
+            composable("tasks/{author}") { destination ->
+                val model: TasksViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { TasksViewModel(services.library, services.tasks) } } })
+                TasksScreen(model, snackbar, requestNotifications, ::openSettings, destination.arguments?.getString("author"))
+            }
+            composable("settings") {
+                val model: SettingsViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { SettingsViewModel(services) } } })
+                SettingsScreen(model, snackbar, {
+                    val initial = preferences.existingDownloadsTreeUri?.let { value -> runCatching {
+                        val tree = Uri.parse(value)
+                        DocumentsContract.buildDocumentUri(checkNotNull(tree.authority), DocumentsContract.getTreeDocumentId(tree))
+                    }.getOrNull() }
+                    picker.launch(initial ?: DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Download/Rule34 Downloader"))
+                }, requestNotifications, onAddAuthor = ::addSubscription)
+            }
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         val detail = route == "collection/{id}" || route == "tasks/{author}" || route == "settings"
@@ -98,42 +141,10 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
                     destinations.forEach { destination -> NavigationRailItem(selected = route == destination.route, onClick = { select(destination) },
                         icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) }, modifier = Modifier.testTag("nav-${destination.route}")) }
                 }
-                Column(Modifier.weight(1f)) {
-                    NavHost(navigation, startDestination = start, modifier = Modifier.weight(1f)) {
-                        composable("subscriptions") {
-                            val model: SubscriptionsViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { SubscriptionsViewModel(services.library, services.tasks) } } })
-                            SubscriptionsScreen(model, snackbar, { id -> navigation.navigate("collection/${Uri.encode(id)}") },
-                                { add.reset(); showAdd = true }, onRequestNotificationPermission, onFailures = { id -> navigation.navigate("tasks/${Uri.encode(id)}") })
-                        }
-                        composable("gallery") {
-                            val model: GalleryViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { GalleryViewModel(services.library, createSavedStateHandle()) } } })
-                            GalleryScreen(model)
-                        }
-                        composable("collection/{id}") { destination ->
-                            val id = destination.arguments?.getString("id")
-                            val model: GalleryViewModel = viewModel(factory = remember(services, id) { viewModelFactory { initializer { GalleryViewModel(services.library, createSavedStateHandle(), id) } } })
-                            GalleryScreen(model)
-                        }
-                        composable("tasks") {
-                            val model: TasksViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { TasksViewModel(services.library, services.tasks) } } })
-                            TasksScreen(model, snackbar, onRequestNotificationPermission, ::openSettings)
-                        }
-                        composable("tasks/{author}") { destination ->
-                            val model: TasksViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { TasksViewModel(services.library, services.tasks) } } })
-                            TasksScreen(model, snackbar, onRequestNotificationPermission, ::openSettings, destination.arguments?.getString("author"))
-                        }
-                        composable("settings") {
-                            val model: SettingsViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { SettingsViewModel(services) } } })
-                            SettingsScreen(model, snackbar, {
-                                val initial = preferences.existingDownloadsTreeUri?.let { value -> runCatching {
-                                    val tree = Uri.parse(value)
-                                    DocumentsContract.buildDocumentUri(checkNotNull(tree.authority), DocumentsContract.getTreeDocumentId(tree))
-                                }.getOrNull() }
-                                picker.launch(initial ?: DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Download/Rule34 Downloader"))
-                            }, onRequestNotificationPermission, onAddAuthor = ::addSubscription)
-                        }
-                    }
-                }
+                NavHost(navigation, graph, modifier = Modifier.weight(1f).fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.surface),
+                    enterTransition = { EnterTransition.None }, exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None }, popExitTransition = { ExitTransition.None })
             }
         }
     }

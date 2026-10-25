@@ -22,8 +22,8 @@ android {
         applicationId = "com.homura251.rule34downloader"
         minSdk = 29
         targetSdk = 36
-        versionCode = 18
-        versionName = "2.1.0"
+        versionCode = 19
+        versionName = "2.1.1"
 
         testInstrumentationRunner = "com.homura251.rule34downloader.ApiAndroidJUnitRunner"
     }
@@ -60,6 +60,8 @@ android {
         compose = true
         buildConfig = true
     }
+
+    testOptions { unitTests.isIncludeAndroidResources = true }
 
     if (providers.gradleProperty("bulkSiteTest").orNull == "true") {
         sourceSets.getByName("androidTest").kotlin.srcDir("src/bulkTest/java")
@@ -102,4 +104,17 @@ dependencies {
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("androidx.test:core:1.7.0")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+}
+
+tasks.withType<Test>().configureEach {
+    systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+    val testHome = layout.buildDirectory.dir("test-home").get().asFile
+    systemProperty("user.home", testHome.absolutePath)
+    systemProperty("maven.repo.local", testHome.resolve("m2").absolutePath)
+    doFirst { testHome.mkdirs() }
 }
