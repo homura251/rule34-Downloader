@@ -36,9 +36,9 @@ class PagedPreviewTest {
             ui.onNodeWithTag("artist-$tag").performTouchInput { click() }
             ui.mainClock.advanceTimeBy(160)
             ui.onNodeWithTag("gallery-grid").assertIsDisplayed()
-            ui.mainClock.advanceTimeUntil(timeoutMillis = 500) {
-                ui.onAllNodesWithTag("subscriptions-list").fetchSemanticsNodes().isEmpty()
-            }
+            // The clock predicate runs on the main thread; assert semantics
+            // from this test thread after advancing the transition frames.
+            ui.mainClock.advanceTimeBy(400)
             ui.onNodeWithTag("subscriptions-list").assertDoesNotExist()
             ui.mainClock.autoAdvance = true
             ui.waitUntil(15_000) { ui.onAllNodesWithText("365 件作品", substring = true).fetchSemanticsNodes().isNotEmpty() }

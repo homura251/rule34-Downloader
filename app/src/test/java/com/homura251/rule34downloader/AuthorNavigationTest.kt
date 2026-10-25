@@ -47,9 +47,9 @@ class AuthorNavigationTest {
                 }
                 ui.mainClock.advanceTimeBy(160)
                 ui.onNodeWithTag("gallery-grid").assertIsDisplayed()
-                ui.mainClock.advanceTimeUntil(timeoutMillis = 500) {
-                    ui.onAllNodesWithTag("subscriptions-list").fetchSemanticsNodes().isEmpty()
-                }
+                // Keep semantic assertions on the test thread; the clock's
+                // advanceTimeUntil predicate runs on Android's main thread.
+                ui.mainClock.advanceTimeBy(400)
                 ui.onNodeWithTag("subscriptions-list").assertDoesNotExist()
                 ui.mainClock.autoAdvance = true
                 ui.waitUntil(15_000) { ui.onAllNodesWithTag("gallery-post-$tag-1").fetchSemanticsNodes().isNotEmpty() }
@@ -59,9 +59,8 @@ class AuthorNavigationTest {
                 ui.onNodeWithContentDescription("返回").performTouchInput { click() }
                 ui.mainClock.advanceTimeBy(160)
                 ui.onNodeWithTag("artist-$tag").assertIsDisplayed()
-                ui.mainClock.advanceTimeUntil(timeoutMillis = 500) {
-                    ui.onAllNodesWithTag("gallery-grid").fetchSemanticsNodes().isEmpty()
-                }
+                ui.mainClock.advanceTimeBy(400)
+                ui.onNodeWithTag("gallery-grid").assertDoesNotExist()
                 ui.mainClock.autoAdvance = true
                 ui.onNodeWithTag("artist-$tag").assertIsDisplayed()
             }
