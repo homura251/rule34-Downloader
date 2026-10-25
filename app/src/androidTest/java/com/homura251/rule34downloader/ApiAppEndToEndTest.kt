@@ -64,7 +64,7 @@ class ApiAppEndToEndTest {
         for (record in saved) {
             val bytes = app.contentResolver.openInputStream(Uri.parse(record.localUri!!))!!.use { it.readBytes() }
             assertEquals(origin.hashes.getValue(record.postId), TestApiOrigin.md5(bytes))
-            assertNull(record.verifiedMd5)
+            assertEquals(origin.hashes.getValue(record.postId), record.verifiedMd5)
         }
         assertEquals(0, origin.authenticationLeaks.get())
         ui.onNodeWithTag("nav-gallery").performClick()

@@ -103,6 +103,24 @@ class LinkedDownloadDirectoryTest {
             assertEquals("folder.tests", result.match!!.uri.authority)
         }
     }
+    @Test fun sameLengthDamageRequiresContentVerification() {
+        provider.root("artist_one")
+        val id = provider.file("root", "42_$hash.png")
+        val tree = DocumentsContract.buildTreeDocumentUri("folder.tests", "root")
+        val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+        val record = DownloadRecord("artist_one", 42, "https://example.test/$hash.png", hash,
+            DownloadStatus.PENDING, 5, 5, uri.toString(), hash)
+        assertEquals(hash, ExistingDownloads(context, "artist_one", {}, { tree.toString() }).lookup(record) {}.match?.verifiedMd5)
+        provider.replaceContent(id, "HELLO".toByteArray())
+        val checked = ExistingDownloads(context, "artist_one", {}, { tree.toString() }).lookup(record) {}
+        assertNull(checked.match)
+        assertTrue(checked.rejection.orEmpty().contains("MD5"))
+        val withoutProof = record.copy(verifiedMd5 = null)
+        assertNull(ExistingDownloads(context, "artist_one", {}, { tree.toString() })
+            .lookup(withoutProof) {}.match?.verifiedMd5)
+        assertNull(ExistingDownloads(context, "artist_one", {}, { tree.toString() })
+            .lookup(withoutProof, verifyContent = true) {}.match)
+    }
     @Test fun unknownRenamedFilesAreLeftUnclaimed() {
         provider.root("artist_one")
         provider.file("root", "renamed.png")
@@ -167,6 +185,7 @@ class FolderDocumentsProvider : ContentProvider() {
     data class Node(val id: String, val parent: String?, val name: String, val directory: Boolean,
         val content: ByteArray = "hello".toByteArray())
     private val nodes = linkedMapOf<String, Node>()
+    fun replaceContent(id: String, value: ByteArray) { nodes[id] = nodes.getValue(id).copy(content = value) }
     val denied = hashSetOf<String>()
     var loading = false
     fun root(name: String) { nodes.clear(); denied.clear(); loading = false; nodes["root"] = Node("root", null, name, true) }

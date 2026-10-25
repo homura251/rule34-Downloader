@@ -257,7 +257,8 @@ class BulkDownloadEndToEndTest {
         var total = 0L
         for (r in saved) {
             assertEquals(DownloadStatus.DOWNLOADED, r.status)
-            assertNull(r.verifiedMd5)
+            if (r.localUri!!.contains("externalstorage.documents")) assertNull(r.verifiedMd5)
+            else assertEquals(origin.hashes.getValue(r.postId), r.verifiedMd5)
             val digest = MessageDigest.getInstance("MD5")
             var length = 0L
             app.contentResolver.openInputStream(Uri.parse(r.localUri!!))!!.use { input ->

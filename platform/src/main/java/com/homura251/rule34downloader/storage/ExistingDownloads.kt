@@ -83,16 +83,31 @@ class ExistingDownloads(
 
     fun find(record: DownloadRecord, checkActive: () -> Unit): Match? = lookup(record, checkActive).match
 
-    fun lookup(record: DownloadRecord, checkActive: () -> Unit): Lookup {
+    // No content scan during ordinary bulk restoration of unverified files.
+    // Previously verified files are checked if they become queued for recovery.
+    fun lookup(record: DownloadRecord, checkActive: () -> Unit): Lookup =
+        lookup(record, verifyContent = record.verifiedMd5 != null, checkActive = checkActive)
+
+    /** Explicitly enable content verification for a single suspect file; stat-only reuse is never verified. */
+    fun lookup(record: DownloadRecord, verifyContent: Boolean, checkActive: () -> Unit): Lookup {
         val expected = FileChecksum.expectedForReuse(record.md5, record.verifiedMd5, record.fileUrl)
+        val inspected = hashSetOf<String>()
+        var checksumRejected = false
         fun readable(uri: Uri): Match? {
+            if (!inspected.add(uri.toString())) return null
             checkActive()
             return try {
-                resolver.openFileDescriptor(uri, "r")?.use { descriptor ->
-                    val bytes = descriptor.statSize
-                    if (bytes <= 0 || (record.totalBytes > 0 && bytes != record.totalBytes)) null
-                    else Match(uri, bytes, record.verifiedMd5.takeIf { uri.toString() == record.localUri })
-                }
+                val bytes = resolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: return null
+                if (bytes <= 0 || (record.totalBytes > 0 && bytes != record.totalBytes)) return null
+                if (verifyContent && expected != null) {
+                    val actual = resolver.openInputStream(uri)?.use { SavedFileIdentity.fingerprint(it, checkActive) }
+                        ?: return null
+                    checkActive()
+                    if (actual.bytes != bytes || actual.md5 != expected) {
+                        checksumRejected = true
+                        null
+                    } else Match(uri, bytes, expected)
+                } else Match(uri, bytes) // A filename or recorded URI is not a checksum proof.
             } catch (_: SecurityException) { null } catch (_: IOException) { null }
         }
         record.localUri?.let { readable(Uri.parse(it))?.let { match -> return Lookup(match) } }
@@ -108,6 +123,6 @@ class ExistingDownloads(
         indexed()?.let { return Lookup(it) }
         loadLinked()
         indexed()?.let { return Lookup(it) }
-        return Lookup(null)
+        return Lookup(null, if (checksumRejected) "帖子 #" + record.postId + " 的旧文件 MD5 校验失败，将重新下载。" else null)
     }
 }

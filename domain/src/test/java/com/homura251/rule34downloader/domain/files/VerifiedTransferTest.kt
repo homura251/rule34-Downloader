@@ -9,11 +9,11 @@ import java.util.concurrent.CancellationException
 
 class VerifiedTransferTest {
     private val hash = "5d41402abc4b2a76b9719d911017c592"
-    @Test fun copiesKnownLengthWithoutReadingBackOrHashing() {
+    @Test fun copiesKnownLengthAndVerifiesTrustedHash() {
         val output = ByteArrayOutputStream()
         val result = VerifiedTransfer.copy(ByteArrayInputStream("hello".toByteArray()), output, hash, 5)
         assertEquals(5L, result.bytes)
-        assertNull(result.md5)
+        assertEquals(hash, result.md5)
         assertEquals("hello", output.toString("UTF-8"))
     }
     @Test fun unknownLengthAcceptsACompleteNonemptyStream() {
@@ -25,12 +25,26 @@ class VerifiedTransferTest {
             assertThrows(IOException::class.java) { copy(body, length) }
         }
     }
-    @Test fun missingOrMismatchedHashesDoNotBlockDownloads() {
-        for (md5 in listOf("", "invalid", "f".repeat(32))) {
+    @Test fun missingOrMalformedHashesDoNotBlockDownloads() {
+        for (md5 in listOf("", "invalid")) {
             val result = VerifiedTransfer.copy(ByteArrayInputStream("hello".toByteArray()), ByteArrayOutputStream(), md5, 5)
             assertEquals(5L, result.bytes)
             assertNull(result.md5)
         }
+    }
+    @Test fun trustedMd5MismatchRejectsSameLengthCorruption() {
+        for (body in listOf("hEllo", "jello")) {
+            val error = assertThrows(FileIntegrityException::class.java) {
+                VerifiedTransfer.copy(ByteArrayInputStream(body.toByteArray()), ByteArrayOutputStream(), hash, 5)
+            }
+            assertTrue(error.message.orEmpty().contains("MD5"))
+        }
+        assertThrows(FileIntegrityException::class.java) {
+            VerifiedTransfer.copy(ByteArrayInputStream("hello".toByteArray()), ByteArrayOutputStream(), "f".repeat(32), 5)
+        }
+        val verified = VerifiedTransfer.copy(ByteArrayInputStream("hello".toByteArray()),
+            ByteArrayOutputStream(), hash.uppercase(), 5)
+        assertEquals(hash, verified.md5)
     }
     @Test fun filenamesUsePostIdAndOptionalMetadataHash() {
         assertEquals("42.png", DownloadFileName.build(42, "", "https://example.test/original.png?token=1"))
@@ -52,5 +66,5 @@ class VerifiedTransferTest {
         assertNull(FileChecksum.expected("invalid", "https://wimg.rule34.xxx/images/42.jpg"))
     }
     private fun copy(body: String, length: Long) = VerifiedTransfer.copy(
-        ByteArrayInputStream(body.toByteArray()), ByteArrayOutputStream(), hash, length)
+        ByteArrayInputStream(body.toByteArray()), ByteArrayOutputStream(), "", length)
 }

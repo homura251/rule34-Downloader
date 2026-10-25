@@ -56,7 +56,9 @@ class MediaStoreDownloader(
                     ?: throw IOException("无法在系统 Download 集合中创建文件。")
                 insertedUri = targetUri
                 val transfer = context.contentResolver.openOutputStream(targetUri, "w")?.use { output ->
-                    VerifiedTransfer.copy(source.input, output, expectedLength = totalBytes, checkActive = ::checkDownloadActive) {
+                    VerifiedTransfer.copy(source.input, output,
+                        expectedMd5 = FileChecksum.expectedForReuse(record.md5, record.verifiedMd5, record.fileUrl).orEmpty(),
+                        expectedLength = totalBytes, checkActive = ::checkDownloadActive) {
                         onProgress(it, totalBytes.coerceAtLeast(0))
                     }
                 } ?: throw IOException("无法打开目标文件。")
