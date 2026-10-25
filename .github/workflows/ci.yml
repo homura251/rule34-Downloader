@@ -42,11 +42,22 @@ jobs:
           cmdline-tools-version: '13114758'
           packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v6
+      - name: Restore fixed debug signing
+        id: debug_signing
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: python3 .github/scripts/debug-signing.py --allow-temporary-for-tests
       - name: Prepare build tools (AGP installs Platform 37.0)
         run: sdkmanager 'build-tools;36.0.0'
       - name: Tests, lint and APKs
-        run: ./gradlew --no-daemon :domain:test :download:test testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest
+        run: |
+          python3 -m unittest discover -s .github/tests -v
+          ./gradlew --no-daemon :domain:test :download:test testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest
+      - name: Verify fixed APK signature before distribution
+        if: steps.debug_signing.outputs.fixed == 'true'
+        run: python3 .github/scripts/debug-signing.py --verify-apk app/build/outputs/apk/debug/app-debug.apk
       - name: Upload installable debug APK
+        if: steps.debug_signing.outputs.fixed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: rule34-Downloader-debug
@@ -61,6 +72,10 @@ jobs:
             **/build/reports/tests/
             **/build/test-results/
             **/build/reports/lint-results-*
+
+      - name: Delete temporary debug signing file
+        if: always()
+        run: rm -f .signing/debug.keystore
 
   device:
     runs-on: ubuntu-latest
@@ -78,6 +93,11 @@ jobs:
           cmdline-tools-version: '13114758'
           packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v6
+      - name: Restore fixed debug signing
+        id: debug_signing
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: python3 .github/scripts/debug-signing.py --allow-temporary-for-tests
       - name: Prepare build tools (AGP installs Platform 37.0)
         run: sdkmanager 'build-tools;36.0.0'
       - name: Enable KVM
@@ -103,6 +123,10 @@ jobs:
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
             app/build/e2e-evidence/
+
+      - name: Delete temporary debug signing file
+        if: always()
+        run: rm -f .signing/debug.keystore
 
   live-api:
     if: github.event_name == 'workflow_dispatch' && inputs.live_api
@@ -155,6 +179,11 @@ jobs:
           cmdline-tools-version: '13114758'
           packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v6
+      - name: Restore fixed debug signing
+        id: debug_signing
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: python3 .github/scripts/debug-signing.py --allow-temporary-for-tests
       - run: sdkmanager 'build-tools;36.0.0'
       - name: Enable KVM
         run: |
@@ -174,3 +203,6 @@ jobs:
         with:
           name: bulk-restore-evidence
           path: app/build/bulk-e2e-evidence/
+      - name: Delete temporary debug signing file
+        if: always()
+        run: rm -f .signing/debug.keystore

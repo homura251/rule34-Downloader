@@ -9,6 +9,7 @@ val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
 val releaseKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
 val signingValues = listOf(releaseStorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
 val releaseSigningConfigured = signingValues.all { !it.isNullOrBlank() }
+val fixedDebugKeystore = rootProject.file(".signing/debug.keystore")
 require(releaseSigningConfigured || signingValues.all { it.isNullOrBlank() }) {
     "Release signing requires ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, " +
         "ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD together."
@@ -22,13 +23,19 @@ android {
         applicationId = "com.homura251.rule34downloader"
         minSdk = 29
         targetSdk = 36
-        versionCode = 20
-        versionName = "2.1.2"
+        versionCode = 21
+        versionName = "2.1.3"
 
         testInstrumentationRunner = "com.homura251.rule34downloader.ApiAndroidJUnitRunner"
     }
 
     signingConfigs {
+        getByName("debug") {
+            storeFile = fixedDebugKeystore
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (releaseSigningConfigured) {
             create("release") {
                 storeFile = rootProject.file(checkNotNull(releaseStorePath))
@@ -109,6 +116,15 @@ dependencies {
     testImplementation("androidx.test:core:1.7.0")
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+}
+
+tasks.matching { it.name == "validateSigningDebug" }.configureEach {
+    doFirst {
+        check(releaseSigningConfigured || fixedDebugKeystore.isFile) {
+            "Fixed debug signing key is missing. Restore ANDROID_DEBUG_KEYSTORE_BASE64 with " +
+                "python3 .github/scripts/debug-signing.py, or import the existing key with --import-from."
+        }
+    }
 }
 
 tasks.withType<Test>().configureEach {

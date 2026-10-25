@@ -1,6 +1,6 @@
 # Rule34 Downloader for Android
 
-Android 10+ 的作者相册与原文件下载应用。2.1.2 提供 **作者 / 全部作品 / 下载** 三个入口；设置位于右上角，支持 Material You 动态配色和宽屏导航。点击作者直接进入相册，不等待封面加载；页面采用约 200 毫秒的短距离滑动，返回时反向过渡，避免长时间淡出和黑屏。
+Android 10+ 的作者相册与原文件下载应用。2.1.3 提供 **作者 / 全部作品 / 下载** 三个入口；设置位于右上角，支持 Material You 动态配色和宽屏导航。点击作者直接进入相册，不等待封面加载；页面采用约 200 毫秒的短距离滑动，返回时反向过渡，避免长时间淡出和黑屏。
 
 ## 使用
 
@@ -78,6 +78,29 @@ Actions artifacts 保存 APK、测试报告、截图和逐阶段实际文件校�
 
 同一个 GitHub Organization 可将这四项设为 Organization Secrets，授权多个仓库读取；所有仓库的签名步骤沿用相同密钥和 alias。个人账户使用每个仓库的 Repository Secrets。备份原始 Keystore 和密码，后续更新沿用同一密钥。
 
-`Signed APK` 工作流验证并构建固定签名 Release。手动运行默认仅生成 artifact，打开 `publish` 才发布；推送与应用版本一致的 `v2.1.2` 形式标签也会发布。发布前运行单元测试、Release lint 并验证 APK 签名；已有同名 Release 不会被删除或覆盖。普通 CI 编译压缩后的未签名 Release，并提供可安装的 Debug APK。
+`Signed APK` 工作流验证并构建固定签名 Release。手动运行默认仅生成 artifact，打开 `publish` 才发布；推送与应用版本一致的 `v2.1.3` 形式标签也会发布。发布前运行单元测试、Release lint 并验证 APK 签名；已有同名 Release 不会被删除或覆盖。普通 CI 编译压缩后的未签名 Release；只有恢复固定 Debug 密钥并核对 APK 证书成功后，才提供可覆盖升级的 Debug APK。缺少固定密钥时继续运行内部测试，但不上传随机签名安装包。
 
-本地固定签名构建读取四项环境变量：`ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。四项齐全后 Debug 与 Release 都使用该密钥，可运行 `./gradlew assembleDebug assembleRelease`；未配置时 Debug 使用 SDK 调试密钥。签名密钥与已安装版本不一致时不能覆盖安装；卸载会清除应用数据库、凭据和目录授权，公共下载文件保留。
+本地固定签名构建读取四项环境变量：`ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。四项齐全后 Debug 与 Release 都使用该密钥，可运行 `./gradlew assembleDebug assembleRelease`；未配置时 Debug 固定使用项目内未跟踪的 `.signing/debug.keystore`，不再自动使用各机器的 SDK 调试密钥。签名密钥与已安装版本不一致时不能覆盖安装；卸载会清除应用数据库、凭据和目录授权，公共下载文件保留。
+
+
+### 固定 Debug 签名
+
+Debug 沿用本次 2.1.0–2.1.3 测试包的同一签名身份；公开证书指纹保存在 `signing/debug-certificate.sha256`，私钥不入库。不同电脑和 CI 必须恢复同一份密钥，不能重新生成来覆盖已有安装。已经丢失私钥的旧随机签名 APK 无法靠新密钥实现覆盖升级。
+
+本地只需导入一次已有密钥，再正常构建：
+
+```bash
+python3 .github/scripts/debug-signing.py --import-from /path/to/existing/debug.keystore
+./gradlew assembleDebug
+python3 .github/scripts/debug-signing.py --verify-apk app/build/outputs/apk/debug/app-debug.apk
+```
+
+将**同一份密钥**的 Base64 存为仓库 Actions Secret `ANDROID_DEBUG_KEYSTORE_BASE64`。CI 校验证书指纹，恢复密钥到 `.signing/debug.keystore`，构建后再次核对 APK 签名；密钥缺失时仅为内部设备测试创建临时密钥，并明确跳过安装包上传。临时密钥不会作为可分发安装包发布。
+
+已有 GitHub CLI 权限时，可用下列命令完成一次性配置；密钥内容不会输出到终端：
+
+```bash
+python3 -c 'import base64,pathlib,sys; sys.stdout.buffer.write(base64.b64encode(pathlib.Path(".signing/debug.keystore").read_bytes()))' | gh secret set ANDROID_DEBUG_KEYSTORE_BASE64 --repo homura251/rule34-Downloader
+```
+
+后续更新保持包名和密钥不变，并递增 `versionCode`。覆盖安装保留应用数据和下载文件。
