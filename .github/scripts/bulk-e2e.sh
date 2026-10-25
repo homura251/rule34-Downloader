@@ -80,10 +80,12 @@ run_phase resume 3000
 # A real package uninstall clears the database, UID ownership and SAF grants.
 adb uninstall "$app_package.test"
 adb uninstall "$app_package"
-if adb shell pm list packages | rg -q '^package:com\.homura251\.rule34downloader$'; then
-  echo 'Application is still installed'
-  exit 1
-fi
+adb shell pm list packages > app/build/bulk-e2e-evidence/packages-after-uninstall.txt
+python3 - <<'PY_UNINSTALL'
+from pathlib import Path
+packages = Path('app/build/bulk-e2e-evidence/packages-after-uninstall.txt').read_text().splitlines()
+assert 'package:com.homura251.rule34downloader' not in packages, 'Application is still installed'
+PY_UNINSTALL
 sleep 2
 adb shell "ls -1 '/sdcard/Download/Rule34 Downloader/test_bulk_$bulk_key/'" > app/build/bulk-e2e-evidence/retained-old-files.txt
 python3 - <<'PY'
@@ -98,10 +100,14 @@ adb shell am start -W -n "$app_package/.MainActivity"
 adb shell uiautomator dump /sdcard/rule34-layout.xml
 adb pull /sdcard/rule34-layout.xml app/build/bulk-e2e-evidence/complete-after-reinstall.xml
 adb exec-out screencap -p > app/build/bulk-e2e-evidence/complete-after-reinstall.png
-python3 - <<'PY_CHECK'
-from pathlib import Path
-text=Path('app/build/bulk-e2e-evidence/complete-after-reinstall.xml').read_text()
-assert '3168' in text or '3,168' in text, 'Three restored author folders (3000 + 84 + 84 files) missing from actual app UI'
+python3 - "$bulk_key" <<'PY_CHECK'
+import re, sys, xml.etree.ElementTree as ET
+root = ET.parse('app/build/bulk-e2e-evidence/complete-after-reinstall.xml').getroot()
+texts = {node.get('text', '') for node in root.iter('node')}
+assert {'作者', '全部作品', '下载'} <= texts, 'The three main navigation entries are missing'
+authors = {f'test_bulk_{sys.argv[1]}', f'test_bulk_api_{sys.argv[1]}', f'test_bulk_crash_{sys.argv[1]}'}
+assert authors & texts, 'No restored author album is visible'
+assert any(re.fullmatch(r'(84|3000) 件作品 · \1 已下载', text) for text in texts), 'A completed author album is missing'
 PY_CHECK
 collect
 printf 'PASS: actual process death; API UI pause/resume; 3000 verified files; real uninstall and SAF reuse\n' > app/build/bulk-e2e-evidence/result.txt

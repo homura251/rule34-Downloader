@@ -167,6 +167,13 @@ class BulkDownloadEndToEndTest {
         resumeThroughUi()
         wait(600_000) { completed() == count && workFinished() }
         wait { read { repo.getCollections() }.all { it.syncState == SyncState.COMPLETE } }
+        val restoredCounts = read { repo.getCollections() }.associate { collection ->
+            collection.tag to read { repo.records(collection.tag) }.count { it.status == DownloadStatus.DOWNLOADED }
+        }
+        assertEquals(3, restoredCounts.size)
+        assertEquals(count, restoredCounts[tag])
+        assertEquals(listOf(84, 84), restoredCounts.filterKeys { it != tag }.values.sorted())
+        assertEquals(count + 168, restoredCounts.values.sum())
         assertEquals("Only damaged or absent originals may cross HTTP", 7, origin.totalOriginals())
         assertEquals(count - 7, records().count { it.localUri!!.contains("externalstorage.documents") })
         assertTrue(record(8)!!.localUri!!.contains("externalstorage.documents"))
