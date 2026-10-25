@@ -7,6 +7,7 @@ import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.homura251.rule34downloader.domain.*
+import com.homura251.rule34downloader.domain.files.FileIntegrityException
 import com.homura251.rule34downloader.network.HttpMediaTransport
 import com.homura251.rule34downloader.storage.*
 import com.homura251.rule34downloader.work.SyncControl
@@ -30,7 +31,7 @@ class DownloadReliabilityTest {
         override suspend fun open(request: MediaRequest) = MediaStream(ByteArrayInputStream(payload), "image/png", payload.size.toLong()) { }
     }
 
-    @Test fun actualMediaStorePublicationReadbackAndDamagedUriRejection() = runBlocking {
+    @Test fun actualMediaStorePublicationAndBasicLengthReuse() = runBlocking {
         val downloader = MediaStoreDownloader(context, source)
         val saved = downloader.download(record(), {}, { _, _ -> }, {})
         val uri = Uri.parse(saved.uri)
@@ -38,21 +39,54 @@ class DownloadReliabilityTest {
             assertEquals(hash, saved.verifiedMd5)
             assertEquals(hash, TestApiOrigin.md5(context.contentResolver.openInputStream(uri)!!.use { it.readBytes() }))
             assertEquals(0, pending())
-            val r = record().copy(localUri = saved.uri, status = DownloadStatus.DOWNLOADED, verifiedMd5 = hash)
+            val r = record().copy(localUri = saved.uri, status = DownloadStatus.DOWNLOADED, totalBytes = payload.size.toLong(), verifiedMd5 = saved.verifiedMd5)
             assertNotNull(ExistingDownloads(context, tag, {}).lookup(r, {}).match)
-            context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(ByteArray(payload.size) { 23 }) }
+            context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(ByteArray(2)) }
             assertNull(ExistingDownloads(context, tag, {}).lookup(r, {}).match)
             assertTrue(context.contentResolver.openInputStream(uri)!!.use { it.read() } >= 0)
         } finally { context.contentResolver.delete(uri, null, null) }
     }
 
-    @Test fun md5MismatchDeletesOnlyTheAttemptAndNeverPublishes() = runBlocking {
-        var published = false
-        try { MediaStoreDownloader(context, source).download(record().copy(md5 = "f".repeat(32)), {}, { _, _ -> }, { published = true }); fail("Must reject invalid bytes") }
-        catch (_: java.io.IOException) { }
-        assertFalse(published)
-        assertEquals(0, pending())
+    @Test fun missingMd5DoesNotBlockDownloads() = runBlocking {
+        for (md5 in listOf("", "invalid")) {
+            var published = false
+            val saved = MediaStoreDownloader(context, source).download(record().copy(md5 = md5, fileUrl = "https://wimg.rule34.xxx/original.png"), {}, { _, _ -> }, { published = true })
+            try {
+                assertTrue(published)
+                assertNull(saved.verifiedMd5)
+                assertEquals(payload.size.toLong(), saved.bytes)
+                assertEquals(0, pending())
+            } finally { context.contentResolver.delete(Uri.parse(saved.uri), null, null) }
+        }
+    }
+
+    @Test fun knownMd5MismatchPreventsPublication() {
+        var called = false
+        assertThrows(FileIntegrityException::class.java) {
+            runBlocking {
+                MediaStoreDownloader(context, source).download(
+                    record().copy(md5 = "f".repeat(32), fileUrl = "https://wimg.rule34.xxx/original.png"),
+                    {}, { _, _ -> }, { called = true })
+            }
+        }
+        assertFalse(called)
         assertEquals(0, rows())
+    }
+
+    @Test fun oldSameLengthCorruptionRejectedWhenPreviouslyVerified() = runBlocking {
+        val saved = MediaStoreDownloader(context, source).download(record(), {}, { _, _ -> }, {})
+        val uri = Uri.parse(saved.uri)
+        try {
+            val damaged = payload.copyOf()
+            damaged[0] = (damaged[0].toInt() xor 1).toByte()
+            context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(damaged) }
+            val old = record().copy(localUri = saved.uri, status = DownloadStatus.PENDING,
+                verifiedMd5 = hash, totalBytes = payload.size.toLong())
+            assertNull(ExistingDownloads(context, tag, {}).lookup(old, {}).match)
+            val fast = ExistingDownloads(context, tag, {}).lookup(old.copy(verifiedMd5 = null), {}).match
+            assertEquals(payload.size.toLong(), fast?.bytes)
+            assertNull(fast?.verifiedMd5)
+        } finally { context.contentResolver.delete(uri, null, null) }
     }
 
     @Test fun historicalVerifiedChecksumCanRestoreAMissingFileWithoutNewApiMetadata() = runBlocking {

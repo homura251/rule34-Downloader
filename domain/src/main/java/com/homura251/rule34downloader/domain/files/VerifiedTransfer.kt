@@ -8,7 +8,7 @@ import java.security.MessageDigest
 
 class FileIntegrityException(message: String) : IOException(message)
 
-/** Original files must have a trustworthy checksum before they can be completed/reused. */
+/** Legacy hash metadata is retained for filenames and matching old downloads. */
 object FileChecksum {
     private val hash = Regex("[a-fA-F0-9]{32}")
     fun normalize(value: String): String? = value.takeIf { it.matches(hash) }?.lowercase()
@@ -21,20 +21,20 @@ object FileChecksum {
         normalize(md5) ?: normalize(verifiedMd5.orEmpty()) ?: expected("", fileUrl)
 }
 
+/** Copies once, checking an optional trusted MD5 as bytes arrive without reading the output back. */
 object VerifiedTransfer {
-    data class Result(val bytes: Long, val md5: String)
+    data class Result(val bytes: Long, val md5: String? = null)
 
     fun copy(
         input: InputStream,
         output: OutputStream,
-        expectedMd5: String,
+        expectedMd5: String = "",
         expectedLength: Long = -1,
         checkActive: () -> Unit = {},
         onProgress: (Long) -> Unit = {},
     ): Result {
         val expected = FileChecksum.normalize(expectedMd5)
-            ?: throw FileIntegrityException("原文件缺少可靠的 MD5，无法确认完整性。")
-        val digest = MessageDigest.getInstance("MD5")
+        val digest = expected?.let { MessageDigest.getInstance("MD5") }
         val buffer = ByteArray(64 * 1024)
         var bytes = 0L
         while (true) {
@@ -45,15 +45,17 @@ object VerifiedTransfer {
             bytes += count
             if (expectedLength >= 0 && bytes > expectedLength) throw FileIntegrityException("原文件长度超过响应声明值。")
             output.write(buffer, 0, count)
-            digest.update(buffer, 0, count)
+            digest?.update(buffer, 0, count)
             onProgress(bytes)
         }
         checkActive()
         if (bytes == 0L) throw FileIntegrityException("原文件为空，未保存。")
         if (expectedLength >= 0 && bytes != expectedLength) throw FileIntegrityException("原文件下载不完整（$bytes/$expectedLength 字节）。")
-        val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
-        if (actual != expected) throw FileIntegrityException("原文件 MD5 校验失败，未保存。")
+        if (expected != null) {
+            val actual = digest!!.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+            if (actual != expected) throw FileIntegrityException("原文件 MD5 校验失败（预期 $expected，实际 $actual）。")
+        }
         output.flush()
-        return Result(bytes, actual)
+        return Result(bytes, expected)
     }
 }

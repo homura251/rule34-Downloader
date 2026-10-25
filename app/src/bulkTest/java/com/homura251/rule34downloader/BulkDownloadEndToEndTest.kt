@@ -47,6 +47,7 @@ class BulkDownloadEndToEndTest {
     private fun completed() = records().count { it.status == DownloadStatus.DOWNLOADED }
 
     @Test fun genuineApiUiProcessRecoveryAndReinstallation() {
+        grantNotificationsForTest()
         waitUiTag("nav-subscriptions")
         try { when (phase) {
             "crash" -> prepareCrash()
@@ -92,7 +93,7 @@ class BulkDownloadEndToEndTest {
         assertEquals(count + 1, origin.totalOriginals())
         verifyAll(); incrementalKeepsUris()
         ui.onNodeWithTag("nav-gallery").performClick(); capture("api-paged-library.png")
-        ui.onNodeWithTag("nav-subscriptions").performClick()
+        openAuthors()
         evidence("PASS: API-only UI pause/resume; all original bytes verified; subsequent sync reused every URI")
     }
     private fun checkpointAndPause() {
@@ -138,7 +139,7 @@ class BulkDownloadEndToEndTest {
         val saved = records().associateBy { it.postId }
         for (id in 1L..5L) {
             val bytes = origin.bytes.getValue(id)
-            val damaged = when (id) { 1L, 2L -> ByteArray(bytes.size) { 23 }; 3L, 4L -> bytes.copyOf(bytes.size / 2); else -> byteArrayOf() }
+            val damaged = byteArrayOf() // Basic recovery detects empty and missing files without hashing content.
             app.contentResolver.openOutputStream(Uri.parse(saved.getValue(id).localUri!!), "wt")!!.use { it.write(damaged) }
         }
         for (id in 6L..7L) app.contentResolver.delete(Uri.parse(saved.getValue(id).localUri!!), null, null)
@@ -166,6 +167,13 @@ class BulkDownloadEndToEndTest {
         resumeThroughUi()
         wait(600_000) { completed() == count && workFinished() }
         wait { read { repo.getCollections() }.all { it.syncState == SyncState.COMPLETE } }
+        val restoredCounts = read { repo.getCollections() }.associate { collection ->
+            collection.tag to read { repo.records(collection.tag) }.count { it.status == DownloadStatus.DOWNLOADED }
+        }
+        assertEquals(3, restoredCounts.size)
+        assertEquals(count, restoredCounts[tag])
+        assertEquals(listOf(84, 84), restoredCounts.filterKeys { it != tag }.values.sorted())
+        assertEquals(count + 168, restoredCounts.values.sum())
         assertEquals("Only damaged or absent originals may cross HTTP", 7, origin.totalOriginals())
         assertEquals(count - 7, records().count { it.localUri!!.contains("externalstorage.documents") })
         assertTrue(record(8)!!.localUri!!.contains("externalstorage.documents"))
@@ -183,19 +191,30 @@ class BulkDownloadEndToEndTest {
     }
 
     private fun addThroughUi() {
-        ui.onNodeWithTag("nav-subscriptions").performClick()
+        openAuthors()
         ui.onNodeWithTag("add-author").performClick()
         ui.onNodeWithTag("author-input").performTextInput(tag)
-        ui.onNodeWithText("继续", substring = false).performClick()
-        waitUiText("订阅并同步"); ui.onNodeWithText("订阅并同步").performClick()
+        ui.onNodeWithText("添加", substring = false).performClick()
+        ui.waitUntil(30_000) {
+            ui.onAllNodesWithContentDescription("返回").fetchSemanticsNodes().isNotEmpty() &&
+                ui.onAllNodesWithTag("author-input").fetchSemanticsNodes().isEmpty()
+        }
+        ui.onNodeWithContentDescription("返回").performClick()
+        ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("artist-$tag"))
         waitUiTag("artist-$tag")
     }
-    private fun syncButton(expected: String) {
+    private fun openAuthors() {
+        if (ui.onAllNodesWithTag("nav-subscriptions").fetchSemanticsNodes().isEmpty())
+            ui.onNodeWithContentDescription("返回").performClick()
+        waitUiTag("nav-subscriptions")
         ui.onNodeWithTag("nav-subscriptions").performClick()
+    }
+    private fun syncButton(expected: String) {
+        openAuthors()
         settleFolderFeedback()
-        ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("sync-$tag"))
-        ui.waitUntil(30_000) { ui.onAllNodes(hasTestTag("sync-$tag") and hasText(expected)).fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithTag("sync-$tag").performScrollTo().performClick()
+        ui.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("artist-$tag"))
+        ui.onNodeWithContentDescription("$tag 更多操作").performClick()
+        ui.onNodeWithTag("sync-$tag").assertTextContains(if (expected == "同步") "更新作者" else expected).performClick()
     }
     private fun pauseThroughUi() {
         syncButton("暂停"); wait { state() == SyncState.PAUSED && workFinished() }
@@ -203,7 +222,7 @@ class BulkDownloadEndToEndTest {
     private fun resumeThroughUi() { assertEquals(SyncState.PAUSED, state()); syncButton("继续") }
     private fun pickFolder(child: Boolean) {
         val previous = read { graph.settings.snapshot() }.existingDownloadsTreeUri
-        ui.onNodeWithTag("nav-settings").performClick()
+        if (ui.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty()) ui.onNodeWithTag("nav-settings").performClick()
         waitUiTag("settings-list")
         settleFolderFeedback()
         ui.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("link-downloads"))
@@ -221,7 +240,7 @@ class BulkDownloadEndToEndTest {
                 !graph.folders.state.value.linking && graph.folders.state.value.result != null
         }
         capture("$phase-folder-granted.png")
-        ui.onNodeWithTag("nav-subscriptions").performClick()
+        openAuthors()
     }
     private fun settleFolderFeedback() {
         if (ui.onAllNodesWithTag("app-message").fetchSemanticsNodes().isEmpty()) return
@@ -238,7 +257,8 @@ class BulkDownloadEndToEndTest {
         var total = 0L
         for (r in saved) {
             assertEquals(DownloadStatus.DOWNLOADED, r.status)
-            assertEquals(origin.hashes.getValue(r.postId), r.verifiedMd5)
+            if (r.localUri!!.contains("externalstorage.documents")) assertNull(r.verifiedMd5)
+            else assertEquals(origin.hashes.getValue(r.postId), r.verifiedMd5)
             val digest = MessageDigest.getInstance("MD5")
             var length = 0L
             app.contentResolver.openInputStream(Uri.parse(r.localUri!!))!!.use { input ->

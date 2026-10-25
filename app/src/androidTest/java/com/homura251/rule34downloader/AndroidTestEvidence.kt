@@ -22,3 +22,12 @@ internal fun writeTestEvidence(context: Context, scope: String, name: String, mi
 
 internal fun writeTestText(context: Context, scope: String, name: String, text: String) =
     writeTestEvidence(context, scope, name, if (name.endsWith(".json", true)) "application/json" else "text/plain") { it.write(text.toByteArray()) }
+
+/** Notification UI is a system-image concern; prepare it before testing app flows. */
+internal fun grantNotificationsForTest() {
+    if (android.os.Build.VERSION.SDK_INT >= 33) {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        instrumentation.uiAutomation.grantRuntimePermission(instrumentation.targetContext.packageName,
+            android.Manifest.permission.POST_NOTIFICATIONS)
+    }
+}

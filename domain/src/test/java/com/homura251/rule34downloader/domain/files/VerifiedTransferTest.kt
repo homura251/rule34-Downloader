@@ -9,28 +9,47 @@ import java.util.concurrent.CancellationException
 
 class VerifiedTransferTest {
     private val hash = "5d41402abc4b2a76b9719d911017c592"
-    @Test fun verifiesKnownLengthAndChecksum() {
+    @Test fun copiesKnownLengthAndVerifiesTrustedHash() {
         val output = ByteArrayOutputStream()
         val result = VerifiedTransfer.copy(ByteArrayInputStream("hello".toByteArray()), output, hash, 5)
         assertEquals(5L, result.bytes)
         assertEquals(hash, result.md5)
         assertEquals("hello", output.toString("UTF-8"))
     }
-    @Test fun unknownLengthStillRequiresFullChecksum() {
+    @Test fun unknownLengthAcceptsACompleteNonemptyStream() {
         assertEquals(5L, copy("hello", -1).bytes)
-        assertThrows(IOException::class.java) { copy("hell", -1) }
+        assertEquals(4L, copy("hell", -1).bytes)
     }
-    @Test fun rejectsEmptyWrongLengthAndCorruptedData() {
-        for ((body, length) in listOf("" to 0L, "hell" to 5L, "hello" to 4L, "wrong" to 5L)) {
+    @Test fun rejectsEmptyAndWrongLength() {
+        for ((body, length) in listOf("" to 0L, "hell" to 5L, "hello" to 4L)) {
             assertThrows(IOException::class.java) { copy(body, length) }
         }
     }
-    @Test fun refusesUnknownChecksumsForBothNewAndOldFiles() {
-        assertThrows(IOException::class.java) {
-            VerifiedTransfer.copy(ByteArrayInputStream("partial".toByteArray()), ByteArrayOutputStream(), "", 7)
+    @Test fun missingOrMalformedHashesDoNotBlockDownloads() {
+        for (md5 in listOf("", "invalid")) {
+            val result = VerifiedTransfer.copy(ByteArrayInputStream("hello".toByteArray()), ByteArrayOutputStream(), md5, 5)
+            assertEquals(5L, result.bytes)
+            assertNull(result.md5)
         }
-        assertNull(SavedFileIdentity.verify(ByteArrayInputStream("partial".toByteArray()), ""))
-        assertFalse(SavedFileIdentity.parse("42.jpg")!!.matches(42, ""))
+    }
+    @Test fun trustedMd5MismatchRejectsSameLengthCorruption() {
+        for (body in listOf("hEllo", "jello")) {
+            val error = assertThrows(FileIntegrityException::class.java) {
+                VerifiedTransfer.copy(ByteArrayInputStream(body.toByteArray()), ByteArrayOutputStream(), hash, 5)
+            }
+            assertTrue(error.message.orEmpty().contains("MD5"))
+        }
+        assertThrows(FileIntegrityException::class.java) {
+            VerifiedTransfer.copy(ByteArrayInputStream("hello".toByteArray()), ByteArrayOutputStream(), "f".repeat(32), 5)
+        }
+        val verified = VerifiedTransfer.copy(ByteArrayInputStream("hello".toByteArray()),
+            ByteArrayOutputStream(), hash.uppercase(), 5)
+        assertEquals(hash, verified.md5)
+    }
+    @Test fun filenamesUsePostIdAndOptionalMetadataHash() {
+        assertEquals("42.png", DownloadFileName.build(42, "", "https://example.test/original.png?token=1"))
+        assertEquals("42_$hash.gif", DownloadFileName.build(42, hash, "https://example.test/original.GIF"))
+        assertEquals("42.bin", DownloadFileName.build(42, "", ""))
     }
     @Test fun pauseAfterLastChunkCannotCompleteAFile() {
         var paused = false
@@ -47,5 +66,5 @@ class VerifiedTransferTest {
         assertNull(FileChecksum.expected("invalid", "https://wimg.rule34.xxx/images/42.jpg"))
     }
     private fun copy(body: String, length: Long) = VerifiedTransfer.copy(
-        ByteArrayInputStream(body.toByteArray()), ByteArrayOutputStream(), hash, length)
+        ByteArrayInputStream(body.toByteArray()), ByteArrayOutputStream(), "", length)
 }

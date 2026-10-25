@@ -7,9 +7,6 @@ import androidx.room.Query
 import androidx.room.RawQuery
 import androidx.room.Upsert
 import androidx.sqlite.db.SupportSQLiteQuery
-import com.homura251.rule34downloader.domain.CollectionSummary
-import com.homura251.rule34downloader.domain.DownloadRecord
-import com.homura251.rule34downloader.domain.GalleryPost
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -56,9 +53,11 @@ interface LibraryDao {
     @Query("UPDATE download_tasks SET status = 'DOWNLOADED', bytes_downloaded = :bytes, total_bytes = :bytes, error = NULL, attempts = 0, updated_at = :now WHERE collection_id = :id AND post_id = :postId")
     suspend fun downloaded(id: String, postId: Long, bytes: Long, now: Long)
     @Query("UPDATE download_tasks SET status = 'PENDING', bytes_downloaded = 0, total_bytes = 0 WHERE collection_id = :id AND post_id = :postId") suspend fun invalidate(id: String, postId: Long)
-    @Query("UPDATE download_tasks SET status = 'FAILED', attempts = attempts + 1, error = :error, updated_at = :now WHERE collection_id = :id AND post_id = :postId")
-    suspend fun failed(id: String, postId: Long, error: String, now: Long)
+    @Query("UPDATE download_tasks SET status = 'FAILED', attempts = attempts + :countAttempt, error = :error, updated_at = :now WHERE collection_id = :id AND post_id = :postId")
+    suspend fun failed(id: String, postId: Long, error: String, now: Long, countAttempt: Int)
     @Query("UPDATE download_tasks SET attempts = 0 WHERE collection_id = :id AND status = 'FAILED'") suspend fun resetFailures(id: String)
+    @Query("UPDATE download_tasks SET attempts = 0 WHERE collection_id = :id AND post_id = :postId AND status = 'FAILED'")
+    suspend fun retryFile(id: String, postId: Long)
     @Query("UPDATE collections SET state = 'QUEUED', last_error = NULL, next_retry_at = NULL WHERE id = :id AND user_paused = 0 AND pool_id IS NULL AND run_id IS NULL") suspend fun markQueued(id: String)
     @Query("UPDATE collections SET run_id = NULL, current_post_id = NULL, state = CASE WHEN pool_id IS NOT NULL THEN 'ARCHIVED' WHEN user_paused = 1 THEN 'PAUSED' WHEN state IN ('DISCOVERING', 'VERIFYING', 'SYNCING', 'PAUSING') THEN 'IDLE' ELSE state END") suspend fun recoverCollections()
     @Query("UPDATE download_tasks SET status = 'PENDING', bytes_downloaded = 0 WHERE status = 'DOWNLOADING'") suspend fun recoverTasks()
@@ -68,6 +67,7 @@ interface LibraryDao {
     @RawQuery suspend fun gallery(query: SupportSQLiteQuery): List<GalleryRow>
     @RawQuery suspend fun count(query: SupportSQLiteQuery): Int
     @RawQuery suspend fun records(query: SupportSQLiteQuery): List<RecordRow>
+    @RawQuery suspend fun failures(query: SupportSQLiteQuery): List<FailureRow>
 }
 
 data class SummaryRow(val id: String, val source_post_id: Long, val last_seen_post_id: Long, val state: String,
@@ -81,3 +81,6 @@ data class GalleryRow(val collection_id: String, val post_id: Long, val file_url
 data class RecordRow(val collection_id: String, val post_id: Long, val file_url: String, val md5: String,
     val status: String, val bytes_downloaded: Long, val total_bytes: Long, val local_uri: String?, val verified_md5: String?,
     val error: String?, val attempts: Int)
+
+data class FailureRow(val collection_id: String, val post_id: Long, val file_url: String, val md5: String,
+    val preview_url: String?, val local_uri: String?, val error: String?, val attempts: Int, val updated_at: Long)

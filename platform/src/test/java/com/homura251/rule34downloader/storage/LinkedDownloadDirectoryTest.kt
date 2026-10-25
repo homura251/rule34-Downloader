@@ -7,7 +7,6 @@ import android.content.pm.ProviderInfo
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.os.Bundle
-import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -89,8 +88,8 @@ class LinkedDownloadDirectoryTest {
         author("root")
         assertEquals(listOf("artist_one"), reader().scan().directories.map { it.name })
     }
-    @Test fun hashNamesRenamedFilesAndNestedOriginalsAreActuallyReused() {
-        for (filename in listOf("$hash.png", "renamed.png", "42_$hash.png")) {
+    @Test fun hashAndPostIdFilenamesAreReusedWithoutContentHashing() {
+        for (filename in listOf("$hash.png", "42.png", "42_$hash.png")) {
             provider.root("My archive")
             val artist = provider.directory("root", "artist_one")
             val images = provider.directory(artist, "images")
@@ -99,10 +98,43 @@ class LinkedDownloadDirectoryTest {
             val record = DownloadRecord("artist_one", 42, "https://example.test/$hash.png", hash, DownloadStatus.PENDING, 0, 0)
             val result = ExistingDownloads(context, "artist_one", {}, { tree.toString() }).lookup(record) {}
             assertNotNull(filename, result.match)
-            assertEquals(hash, result.match!!.verifiedMd5)
+            assertNull(result.match!!.verifiedMd5)
             assertEquals(5L, result.match!!.bytes)
             assertEquals("folder.tests", result.match!!.uri.authority)
         }
+    }
+    @Test fun sameLengthDamageRequiresContentVerification() {
+        provider.root("artist_one")
+        val id = provider.file("root", "42_$hash.png")
+        val tree = DocumentsContract.buildTreeDocumentUri("folder.tests", "root")
+        val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+        val record = DownloadRecord("artist_one", 42, "https://example.test/$hash.png", hash,
+            DownloadStatus.PENDING, 5, 5, uri.toString(), hash)
+        assertEquals(hash, ExistingDownloads(context, "artist_one", {}, { tree.toString() }).lookup(record) {}.match?.verifiedMd5)
+        provider.replaceContent(id, "HELLO".toByteArray())
+        val checked = ExistingDownloads(context, "artist_one", {}, { tree.toString() }).lookup(record) {}
+        assertNull(checked.match)
+        assertTrue(checked.rejection.orEmpty().contains("MD5"))
+        val withoutProof = record.copy(verifiedMd5 = null)
+        assertNull(ExistingDownloads(context, "artist_one", {}, { tree.toString() })
+            .lookup(withoutProof) {}.match?.verifiedMd5)
+        assertNull(ExistingDownloads(context, "artist_one", {}, { tree.toString() })
+            .lookup(withoutProof, verifyContent = true) {}.match)
+    }
+    @Test fun unknownRenamedFilesAreLeftUnclaimed() {
+        provider.root("artist_one")
+        provider.file("root", "renamed.png")
+        val tree = DocumentsContract.buildTreeDocumentUri("folder.tests", "root")
+        val record = DownloadRecord("artist_one", 42, "https://example.test/$hash.png", hash, DownloadStatus.PENDING, 0, 0)
+        assertNull(ExistingDownloads(context, "artist_one", {}, { tree.toString() }).lookup(record) {}.match)
+    }
+    @Test fun deepDirectoriesHaveNoArbitraryDepthLimit() {
+        provider.root("Rule34 Downloader")
+        var folder = provider.directory("root", "artist_one")
+        repeat(80) { folder = provider.directory(folder, "images") }
+        provider.file(folder, "42.png")
+        assertEquals("artist_one", reader().scan().directories.single { it.fileCount > 0 }.name)
+        assertEquals(1, reader().filesForAuthor("artist_one").size)
     }
     @Test fun aRecordedValidFileRemainsReusableWhileTheLinkedFolderIsLoading() {
         provider.root("Rule34 Downloader")
@@ -153,6 +185,7 @@ class FolderDocumentsProvider : ContentProvider() {
     data class Node(val id: String, val parent: String?, val name: String, val directory: Boolean,
         val content: ByteArray = "hello".toByteArray())
     private val nodes = linkedMapOf<String, Node>()
+    fun replaceContent(id: String, value: ByteArray) { nodes[id] = nodes.getValue(id).copy(content = value) }
     val denied = hashSetOf<String>()
     var loading = false
     fun root(name: String) { nodes.clear(); denied.clear(); loading = false; nodes["root"] = Node("root", null, name, true) }

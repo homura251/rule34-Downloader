@@ -130,6 +130,35 @@ class LibraryMigrationTest {
         } finally { db.close(); context.deleteDatabase(name) }
     }
 
+    @Test fun failuresKeepCollectionIdentityAndSelectedRetryDoesNotResetOtherFiles() = runBlocking {
+        val name = "file-failures.db"; context.deleteDatabase(name)
+        var db = LibraryDatabase.open(context, name)
+        try {
+            var repo = RoomLibraryRepository(db)
+            for (id in listOf("one", "two")) {
+                repo.addCollection(id, 0); repo.beginRun(id, id)
+                repo.savePage(id, id, listOf(post(1).copy(md5 = ""), post(2)), ScanCheckpoint(0, 1, 2))
+                repeat(3) { repo.markFailed(id, id, 1, "HTTP 403") }
+                repo.markFailed(id, id, 2, "network interrupted", countAttempt = false)
+                repo.endRun(id, id)
+            }
+            assertEquals(4, repo.failedDownloads(null, 0, 1).totalCount)
+            assertEquals(1, repo.failedDownloads(null, 0, 1).files.size)
+            assertEquals(2, repo.failedDownloads("one", 0, 20).totalCount)
+            db.close(); db = LibraryDatabase.open(context, name); repo = RoomLibraryRepository(db)
+            assertEquals(4, repo.failedDownloads(null, 0, 20).files.size)
+            repo.retryFiles(listOf(DownloadFileKey("one", 1)))
+            assertEquals(0, repo.records("one").single { it.postId == 1L }.attempts)
+            assertEquals(3, repo.records("two").single { it.postId == 1L }.attempts)
+            assertEquals(0, repo.records("two").single { it.postId == 2L }.attempts)
+            repo.beginRun("one", "success")
+            repo.markDownloaded("one", "success", 1, SavedFile("content://new/1", 10))
+            assertNull(repo.records("one").single { it.postId == 1L }.verifiedMd5)
+            assertEquals(3, repo.failedDownloads(null, 0, 20).totalCount)
+            assertEquals("HTTP 403", repo.failedDownloads("two", 0, 20).files.single { it.key.postId == 1L }.post.error)
+        } finally { db.close(); context.deleteDatabase(name) }
+    }
+
     @Test fun allFiveLegacyVersionsPreserveUrisPauseIntentAndPoolOrdering() = runBlocking {
         for (version in 1..5) {
             val name = "legacy-$version.db"
@@ -147,7 +176,7 @@ class LibraryMigrationTest {
                 val saved = records.single { it.postId == 1L }
                 assertEquals("content://legacy/artist/1", saved.localUri)
                 assertEquals(if (version == 5) hash else null, saved.verifiedMd5)
-                assertEquals(if (version == 5) DownloadStatus.DOWNLOADED else DownloadStatus.PENDING, saved.status)
+                assertEquals(DownloadStatus.DOWNLOADED, saved.status)
                 val partial = records.single { it.postId == 3L }
                 assertEquals(DownloadStatus.PENDING, partial.status)
                 assertEquals(0L, partial.bytesDownloaded)

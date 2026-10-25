@@ -70,9 +70,8 @@ class LegacyMigration(from: Int) : Migration(from, 6) {
             FROM downloads ORDER BY CASE WHEN LENGTH(md5) = 32 THEN 0 ELSE 1 END, updated_at DESC""")
         db.execSQL("""INSERT INTO collection_posts SELECT d.artist_tag, d.post_id, p.position, p.preview_url
             FROM downloads d LEFT JOIN pool_posts p ON p.pool_tag = d.artist_tag AND p.post_id = d.post_id""")
-        val needsVerification = if (startVersion < 5) " OR status = 'DOWNLOADED'" else ""
         db.execSQL("""INSERT INTO download_tasks SELECT artist_tag, post_id,
-            CASE WHEN status = 'DOWNLOADING'$needsVerification THEN 'PENDING' ELSE status END,
+            CASE WHEN status = 'DOWNLOADING' THEN 'PENDING' ELSE status END,
             CASE WHEN status = 'DOWNLOADING' THEN 0 ELSE bytes_downloaded END, total_bytes, 0, error, updated_at FROM downloads""")
         db.execSQL("""INSERT INTO local_files SELECT artist_tag, post_id, local_uri, bytes_downloaded, verified_md5
             FROM downloads WHERE local_uri IS NOT NULL""")
