@@ -46,13 +46,23 @@ class AuthorNavigationTest {
                     if (it == 0) click() else click(center.copy(y = height - 24f))
                 }
                 ui.mainClock.advanceTimeBy(160)
-                ui.onNodeWithTag("subscriptions-list").assertDoesNotExist()
                 ui.onNodeWithTag("gallery-grid").assertIsDisplayed()
+                ui.mainClock.advanceTimeUntil(timeoutMillis = 500) {
+                    ui.onAllNodesWithTag("subscriptions-list").fetchSemanticsNodes().isEmpty()
+                }
+                ui.onNodeWithTag("subscriptions-list").assertDoesNotExist()
                 ui.mainClock.autoAdvance = true
                 ui.waitUntil(15_000) { ui.onAllNodesWithTag("gallery-post-$tag-1").fetchSemanticsNodes().isNotEmpty() }
                 ui.onNodeWithTag("gallery-post-$tag-1").assertIsDisplayed()
                 ui.onNodeWithTag("image-preview-pager").assertDoesNotExist()
+                ui.mainClock.autoAdvance = false
                 ui.onNodeWithContentDescription("返回").performTouchInput { click() }
+                ui.mainClock.advanceTimeBy(160)
+                ui.onNodeWithTag("artist-$tag").assertIsDisplayed()
+                ui.mainClock.advanceTimeUntil(timeoutMillis = 500) {
+                    ui.onAllNodesWithTag("gallery-grid").fetchSemanticsNodes().isEmpty()
+                }
+                ui.mainClock.autoAdvance = true
                 ui.onNodeWithTag("artist-$tag").assertIsDisplayed()
             }
         } finally { graph.background.remove(tag); images.shutdown() }

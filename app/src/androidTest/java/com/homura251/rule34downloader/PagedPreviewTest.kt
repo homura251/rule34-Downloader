@@ -35,8 +35,11 @@ class PagedPreviewTest {
             ui.mainClock.autoAdvance = false
             ui.onNodeWithTag("artist-$tag").performTouchInput { click() }
             ui.mainClock.advanceTimeBy(160)
-            ui.onNodeWithTag("subscriptions-list").assertDoesNotExist()
             ui.onNodeWithTag("gallery-grid").assertIsDisplayed()
+            ui.mainClock.advanceTimeUntil(timeoutMillis = 500) {
+                ui.onAllNodesWithTag("subscriptions-list").fetchSemanticsNodes().isEmpty()
+            }
+            ui.onNodeWithTag("subscriptions-list").assertDoesNotExist()
             ui.mainClock.autoAdvance = true
             ui.waitUntil(15_000) { ui.onAllNodesWithText("365 件作品", substring = true).fetchSemanticsNodes().isNotEmpty() }
             ui.onNodeWithTag("gallery-grid").performScrollToIndex(50)

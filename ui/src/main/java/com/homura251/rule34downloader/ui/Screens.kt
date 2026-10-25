@@ -68,7 +68,8 @@ fun SubscriptionsScreen(viewModel: SubscriptionsViewModel, snackbar: SnackbarHos
     val collections by viewModel.collections.collectAsStateWithLifecycle()
     var removing by remember { mutableStateOf<CollectionSummary?>(null) }
     ReportMessages(viewModel, snackbar)
-    LazyVerticalGrid(columns = GridCells.Adaptive(148.dp), modifier = Modifier.fillMaxSize().testTag("subscriptions-list"),
+    LazyVerticalGrid(columns = GridCells.Adaptive(148.dp), modifier = Modifier.fillMaxSize()
+        .background(MaterialTheme.colorScheme.surface).testTag("subscriptions-list"),
         contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (collections.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
@@ -154,7 +155,7 @@ fun TasksScreen(viewModel: TasksViewModel, snackbar: SnackbarHostState, onReques
         "已暂停" -> it.syncState == SyncState.PAUSED
         else -> true
     } }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
                 Metric("待下载", jobs.sumOf { it.pendingCount }.toString())
@@ -257,7 +258,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, snackbar: SnackbarHostState, on
     val uriHandler = LocalUriHandler.current
     val folder by viewModel.folderState.collectAsStateWithLifecycle()
     ReportMessages(viewModel, snackbar)
-    LazyColumn(Modifier.fillMaxSize().testTag("settings-list"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).testTag("settings-list"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         item { SettingsSection("账号与 API") {
             Text(when (account.status) { AccountStatus.READY -> "已保存 · User ID ${account.userId}"; AccountStatus.INVALID -> "凭据需要更新"; else -> "尚未连接" }, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             CredentialsForm(state, account, viewModel)

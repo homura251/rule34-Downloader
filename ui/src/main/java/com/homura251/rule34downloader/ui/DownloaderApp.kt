@@ -6,8 +6,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -15,7 +17,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.createSavedStateHandle
@@ -61,6 +65,7 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
         }
     }
     val start = "subscriptions"
+    val slideDistance = with(LocalDensity.current) { 24.dp.roundToPx() }
     val snackbar = remember { SnackbarHostState() }
     var showAdd by rememberSaveable { mutableStateOf(false) }
     val add: AddSubscriptionViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { AddSubscriptionViewModel(services) } } })
@@ -88,7 +93,7 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
         navigation.createGraph(startDestination = start) {
             composable("subscriptions") {
                 val model: SubscriptionsViewModel = viewModel(factory = remember(services) { viewModelFactory { initializer { SubscriptionsViewModel(services.library, services.tasks) } } })
-                SubscriptionsScreen(model, snackbar, { id -> navigation.navigate("collection/${Uri.encode(id)}") },
+                SubscriptionsScreen(model, snackbar, { id -> navigation.navigate("collection/${Uri.encode(id)}") { launchSingleTop = true } },
                     { add.reset(); showAdd = true }, requestNotifications, onFailures = { id -> navigation.navigate("tasks/${Uri.encode(id)}") })
             }
             composable("gallery") {
@@ -142,9 +147,11 @@ fun DownloaderApp(services: AppServices, onRequestNotificationPermission: () -> 
                         icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) }, modifier = Modifier.testTag("nav-${destination.route}")) }
                 }
                 NavHost(navigation, graph, modifier = Modifier.weight(1f).fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.surface),
-                    enterTransition = { EnterTransition.None }, exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None }, popExitTransition = { ExitTransition.None })
+                    .clipToBounds().background(MaterialTheme.colorScheme.surface),
+                    enterTransition = { slideInHorizontally(tween(200, easing = FastOutSlowInEasing)) { slideDistance } },
+                    exitTransition = { slideOutHorizontally(tween(200, easing = FastOutSlowInEasing)) { -slideDistance } },
+                    popEnterTransition = { slideInHorizontally(tween(200, easing = FastOutSlowInEasing)) { -slideDistance } },
+                    popExitTransition = { slideOutHorizontally(tween(200, easing = FastOutSlowInEasing)) { slideDistance } })
             }
         }
     }

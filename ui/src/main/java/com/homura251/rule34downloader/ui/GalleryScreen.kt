@@ -83,7 +83,7 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     var showPreview by rememberSaveable { mutableStateOf(false) }
     var previewIndex by rememberSaveable { mutableStateOf(0) }
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GalleryFilter.entries.forEach { value ->
                 FilterChip(selected = filter == value, onClick = { viewModel.filter(value) }, label = { Text(value.label) })

@@ -1,6 +1,6 @@
 # Rule34 Downloader for Android
 
-Android 10+ 的作者相册与原文件下载应用。2.1.1 提供 **作者 / 全部作品 / 下载** 三个入口；设置位于右上角，支持 Material You 动态配色和宽屏导航。点击作者直接进入相册，页面切换不等待封面加载或淡入淡出动画。
+Android 10+ 的作者相册与原文件下载应用。2.1.2 提供 **作者 / 全部作品 / 下载** 三个入口；设置位于右上角，支持 Material You 动态配色和宽屏导航。点击作者直接进入相册，不等待封面加载；页面采用约 200 毫秒的短距离滑动，返回时反向过渡，避免长时间淡出和黑屏。
 
 ## 使用
 
@@ -78,6 +78,6 @@ Actions artifacts 保存 APK、测试报告、截图和逐阶段实际文件校�
 
 同一个 GitHub Organization 可将这四项设为 Organization Secrets，授权多个仓库读取；所有仓库的签名步骤沿用相同密钥和 alias。个人账户使用每个仓库的 Repository Secrets。备份原始 Keystore 和密码，后续更新沿用同一密钥。
 
-`Signed APK` 工作流验证并构建固定签名 Release。手动运行默认仅生成 artifact，打开 `publish` 才发布；推送与应用版本一致的 `v2.1.1` 形式标签也会发布。发布前运行单元测试、Release lint 并验证 APK 签名；已有同名 Release 不会被删除或覆盖。普通 CI 编译压缩后的未签名 Release，并提供可安装的 Debug APK。
+`Signed APK` 工作流验证并构建固定签名 Release。手动运行默认仅生成 artifact，打开 `publish` 才发布；推送与应用版本一致的 `v2.1.2` 形式标签也会发布。发布前运行单元测试、Release lint 并验证 APK 签名；已有同名 Release 不会被删除或覆盖。普通 CI 编译压缩后的未签名 Release，并提供可安装的 Debug APK。
 
 本地固定签名构建读取四项环境变量：`ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。四项齐全后 Debug 与 Release 都使用该密钥，可运行 `./gradlew assembleDebug assembleRelease`；未配置时 Debug 使用 SDK 调试密钥。签名密钥与已安装版本不一致时不能覆盖安装；卸载会清除应用数据库、凭据和目录授权，公共下载文件保留。
